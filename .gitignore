@@ -1,0 +1,36 @@
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+/tmp/
+/razad-daemon
+/razad-install
+/razad
+
+# Go vendor
+vendor/
+
+# SvelteKit / Node
+web/node_modules/
+web/build/
+web/.svelte-kit/
+web/.vite/
+web/package-lock.json
+
+# Editor
+.idea/
+.vscode/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Env
+.env
+.env.local
