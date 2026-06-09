@@ -13,8 +13,8 @@ func TestDefaults(t *testing.T) {
 	if cfg.Mode != "self-hosted" {
 		t.Errorf("expected mode self-hosted, got %s", cfg.Mode)
 	}
-	if cfg.Database.Driver != "sqlite" {
-		t.Errorf("expected sqlite driver, got %s", cfg.Database.Driver)
+	if cfg.Database.Driver != "sqlite3" {
+		t.Errorf("expected sqlite3 driver, got %s", cfg.Database.Driver)
 	}
 }
 
@@ -65,8 +65,21 @@ func TestValidate_EmptyHost(t *testing.T) {
 func TestValidate_EmptyDSN(t *testing.T) {
 	cfg := Defaults()
 	cfg.Database.DSN = ""
+	cfg.Database.Driver = "postgres" // SQLite derives DSN from DataDir, so use postgres
 	if err := cfg.Validate(); err == nil {
-		t.Error("expected error for empty DSN")
+		t.Error("expected error for empty DSN with postgres driver")
+	}
+}
+
+func TestValidate_DerivedSQLiteDSN(t *testing.T) {
+	cfg := Defaults()
+	cfg.Database.DSN = ""
+	cfg.Database.Driver = "sqlite3"
+	if err := cfg.Validate(); err != nil {
+		t.Fatalf("expected no error for sqlite3 with empty DSN, got: %v", err)
+	}
+	if cfg.Database.DSN != "/var/lib/razad/razad.db" {
+		t.Errorf("expected DSN to be derived from DataDir, got %s", cfg.Database.DSN)
 	}
 }
 

@@ -6,6 +6,7 @@
 		type?: 'button' | 'submit';
 		onclick?: (e: MouseEvent) => void;
 		class?: string;
+		children: import('svelte').Snippet;
 	}
 	let {
 		variant = 'primary',
@@ -13,7 +14,8 @@
 		disabled = false,
 		type = 'button',
 		onclick,
-		class: className = ''
+		class: className = '',
+		children
 	}: Props = $props();
 </script>
 
@@ -43,13 +45,10 @@
 		opacity: 0.5;
 		cursor: not-allowed;
 	}
-
-	/* ---- Sizes ---- */
 	.btn.sm { font-size: var(--font-size-xs); padding: 0.25rem 0.5rem; }
 	.btn.md { font-size: var(--font-size-sm); padding: 0.375rem 0.75rem; }
 	.btn.lg { font-size: var(--font-size-base); padding: 0.5rem 1rem; }
 
-	/* ---- Variants ---- */
 	.primary {
 		background: var(--primary);
 		color: #04161D;
@@ -59,7 +58,6 @@
 		background: var(--primary-hover);
 		border-color: var(--primary-hover);
 	}
-
 	.secondary {
 		background: var(--surface-2);
 		color: var(--text);
@@ -69,7 +67,6 @@
 		background: var(--surface-3);
 		border-color: var(--border-strong);
 	}
-
 	.ghost {
 		background: transparent;
 		color: var(--text-secondary);
@@ -79,7 +76,6 @@
 		background: var(--surface);
 		color: var(--text);
 	}
-
 	.danger {
 		background: var(--danger-bg);
 		color: var(--danger);

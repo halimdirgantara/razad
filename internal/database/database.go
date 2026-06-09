@@ -15,7 +15,7 @@ import (
 func Open(cfg config.DatabaseConfig) (*sql.DB, error) {
 	driver := cfg.Driver
 	if driver == "" {
-		driver = "sqlite"
+		driver = "sqlite3"
 	}
 
 	db, err := sql.Open(driver, cfg.DSN)

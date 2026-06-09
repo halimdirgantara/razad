@@ -93,13 +93,12 @@ func main() {
 		}
 	}))
 
-	// Serve embedded UI (SvelteKit static build)
+	// Serve embedded UI (SvelteKit static build) with SPA fallback
 	uiFS, err := fs.Sub(web.UI, "build")
 	if err != nil {
 		slog.Warn("no embedded UI found, UI will not be served", "error", err)
 	} else {
-		fileServer := http.FileServer(http.FS(uiFS))
-		router.Handle("/", fileServer)
+		router.Handle("/", spaFallbackHandler(uiFS))
 	}
 
 	// Start HTTP server
@@ -145,4 +144,35 @@ func seedAdminIfNeeded(svc *auth.Service) {
 		return
 	}
 	slog.Info("created default admin user (admin@razad.local / razadadmin)")
+}
+
+// spaFallbackHandler serves static files with SPA fallback to index.html
+// for client-side routing (SvelteKit). API paths are not handled here.
+func spaFallbackHandler(uiFS fs.FS) http.Handler {
+	fileServer := http.FileServer(http.FS(uiFS))
+
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Let API routes pass through to the router
+		if len(r.URL.Path) >= 4 && r.URL.Path[:4] == "/api" {
+			http.NotFound(w, r)
+			return
+		}
+
+		// Check if the file exists in the embedded FS
+		path := r.URL.Path
+		if path == "/" {
+			path = "/index.html"
+		}
+
+		f, err := uiFS.Open(path[1:]) // strip leading slash
+		if err == nil {
+			f.Close()
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+
+		// SPA fallback: serve index.html for all non-file routes
+		r.URL.Path = "/"
+		fileServer.ServeHTTP(w, r)
+	})
 }

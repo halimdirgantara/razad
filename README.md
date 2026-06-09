@@ -138,6 +138,80 @@ This builds the SvelteKit frontend, embeds it into the Go binary, and outputs a 
 
 ---
 
+## Running the App
+
+### Start the daemon
+
+```bash
+make clean && mkdir -p tmp/razad
+RAZAD_DEBUG=true RAZAD_PORT=8080 RAZAD_DATA_DIR=./tmp/razad \
+CGO_ENABLED=1 go run ./cmd/razad-daemon/
+```
+
+The daemon creates a default admin user on first boot and listens on `http://localhost:8080`.
+
+### Test API endpoints
+
+```bash
+# Health check (public)
+curl -s http://localhost:8080/api/v1/health | jq .
+# → {"status":"ok"}
+
+# Login
+curl -s -X POST http://localhost:8080/api/v1/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@razad.local","password":"razadadmin"}' | jq .
+# Save the "token" value from the response
+
+# Authenticated endpoint (replace TOKEN)
+TOKEN="<your-token>"
+curl -s http://localhost:8080/api/v1/auth/me \
+  -H "Authorization: Bearer $TOKEN" | jq .
+
+# Create an organization
+curl -s -X POST http://localhost:8080/api/v1/orgs \
+  -H "Authorization: Bearer $TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"name":"My Project","slug":"my-project"}' | jq .
+
+# List organizations
+curl -s http://localhost:8080/api/v1/orgs \
+  -H "Authorization: Bearer $TOKEN" | jq .
+```
+
+### Test the UI
+
+With the daemon running, open `http://localhost:8080` in a browser.
+
+- **Dashboard** — Operations Center with system health strip and workspace cards
+- **Login** — `http://localhost:8080/login` — dark login form with show/hide password
+- **Default credentials** — `admin@razad.local` / `razadadmin`
+
+For hot-reload frontend development:
+
+```bash
+# Terminal 1: backend on :8080
+make dev
+
+# Terminal 2: frontend on :5173 (proxies API to :8080)
+make web-dev
+```
+
+### Run tests
+
+```bash
+# All unit tests
+make test
+
+# Specific package
+CGO_ENABLED=1 go test github.com/razad/razad/internal/auth -count=1 -v
+
+# Full test suite with coverage
+CGO_ENABLED=1 go test github.com/razad/razad/... -count=1 -cover
+```
+
+---
+
 ## Project Structure
 
 ```

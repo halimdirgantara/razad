@@ -78,8 +78,8 @@ func Defaults() Config {
 		Host:   "127.0.0.1",
 		DataDir: "/var/lib/razad",
 		Database: DatabaseConfig{
-			Driver:                 "sqlite",
-			DSN:                    "/var/lib/razad/razad.db",
+			Driver:                 "sqlite3",
+			DSN:                    "",
 			MaxOpenConns:          10,
 			MaxIdleConns:          5,
 			ConnMaxLifetimeSeconds: 300,
@@ -103,8 +103,8 @@ func Load() (Config, error) {
 	return cfg, nil
 }
 
-// Validate checks that the configuration is valid.
-func (c Config) Validate() error {
+// Validate checks that the configuration is valid and resolves defaults.
+func (c *Config) Validate() error {
 	var errs []string
 
 	if c.Port < 1 || c.Port > 65535 {
@@ -122,8 +122,13 @@ func (c Config) Validate() error {
 	default:
 		errs = append(errs, "mode must be one of: self-hosted, byo-vps, managed")
 	}
-	if c.Database.Driver != "postgres" && c.Database.Driver != "sqlite" {
-		errs = append(errs, "database.driver must be postgres or sqlite")
+	if c.Database.Driver != "postgres" && c.Database.Driver != "sqlite3" {
+		errs = append(errs, "database.driver must be postgres or sqlite3")
+	}
+
+	// Derive default DSN from data dir for SQLite
+	if c.Database.DSN == "" && c.Database.Driver == "sqlite3" {
+		c.Database.DSN = c.DataDir + "/razad.db"
 	}
 	if c.Database.DSN == "" {
 		errs = append(errs, "database.dsn must not be empty")

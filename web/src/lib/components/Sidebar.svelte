@@ -27,7 +27,7 @@
 
 <aside class="sidebar">
 	<div class="sidebar-brand">
-		<span class="brand-icon">◈</span>
+		<img class="brand-logo" src="/razad-logo.png" alt="Razad" />
 		<span class="brand-name">Razad</span>
 		<span class="brand-version">v0.1</span>
 	</div>
@@ -52,15 +52,6 @@
 			</div>
 		{/each}
 	</nav>
-	<div class="sidebar-footer">
-		<div class="sidebar-user">
-			<div class="user-avatar"></div>
-			<div class="user-info">
-				<span class="user-name">admin</span>
-				<span class="user-role">Self-hosted</span>
-			</div>
-		</div>
-	</div>
 </aside>
 
 <style>
@@ -75,14 +66,16 @@
 	}
 	.sidebar-brand {
 		display: flex;
+		flex-direction: column;
 		align-items: center;
-		gap: var(--space-2);
-		padding: var(--space-4) var(--space-4) var(--space-3);
+		padding: var(--space-5) var(--space-4) var(--space-3);
 		border-bottom: 1px solid var(--border);
+		gap: var(--space-2);
 	}
-	.brand-icon {
-		font-size: 1.25rem;
-		color: var(--primary);
+	.brand-logo {
+		width: 40px;
+		height: 40px;
+		border-radius: var(--radius-md);
 	}
 	.brand-name {
 		font-weight: var(--font-weight-bold);
@@ -92,7 +85,6 @@
 	.brand-version {
 		font-size: var(--font-size-xs);
 		color: var(--text-muted);
-		margin-left: auto;
 	}
 	.sidebar-nav {
 		flex: 1;
@@ -141,41 +133,5 @@
 	}
 	.nav-label {
 		white-space: nowrap;
-	}
-
-	/* ---- Footer / User ---- */
-	.sidebar-footer {
-		padding: var(--space-3) var(--space-3);
-		border-top: 1px solid var(--border);
-	}
-	.sidebar-user {
-		display: flex;
-		align-items: center;
-		gap: var(--space-2);
-	}
-	.user-avatar {
-		width: 28px;
-		height: 28px;
-		border-radius: 50%;
-		background: var(--surface-3);
-		border: 1px solid var(--border);
-		flex-shrink: 0;
-	}
-	.user-info {
-		display: flex;
-		flex-direction: column;
-		min-width: 0;
-	}
-	.user-name {
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-medium);
-		color: var(--text);
-		overflow: hidden;
-		text-overflow: ellipsis;
-		white-space: nowrap;
-	}
-	.user-role {
-		font-size: var(--font-size-xs);
-		color: var(--text-muted);
 	}
 </style>

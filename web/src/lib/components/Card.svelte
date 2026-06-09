@@ -1,14 +1,16 @@
 <script lang="ts">
 	interface Props {
 		title?: string;
-		actions?: unknown; // for slot
 		padding?: 'tight' | 'normal' | 'loose';
+		children: import('svelte').Snippet;
+		actions?: import('svelte').Snippet;
 		class?: string;
 	}
 	let {
 		title = '',
-		actions = null,
 		padding = 'normal',
+		children,
+		actions,
 		class: className = ''
 	}: Props = $props();
 </script>
@@ -16,7 +18,9 @@
 <div class="card {padding} {className}">
 	{#if title || actions}
 		<div class="card-header">
-			<h3 class="card-title">{title}</h3>
+			{#if title}
+				<h3 class="card-title">{title}</h3>
+			{/if}
 			{#if actions}
 				<div class="card-actions">
 					{@render actions()}
