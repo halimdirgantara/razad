@@ -66,16 +66,16 @@
 	}
 	.sidebar-brand {
 		display: flex;
-		flex-direction: column;
 		align-items: center;
-		padding: var(--space-5) var(--space-4) var(--space-3);
-		border-bottom: 1px solid var(--border);
 		gap: var(--space-2);
+		padding: var(--space-3) var(--space-4);
+		border-bottom: 1px solid var(--border);
 	}
 	.brand-logo {
-		width: 40px;
-		height: 40px;
-		border-radius: var(--radius-md);
+		width: 28px;
+		height: 28px;
+		border-radius: var(--radius-sm);
+		flex-shrink: 0;
 	}
 	.brand-name {
 		font-weight: var(--font-weight-bold);
@@ -85,6 +85,7 @@
 	.brand-version {
 		font-size: var(--font-size-xs);
 		color: var(--text-muted);
+		margin-left: auto;
 	}
 	.sidebar-nav {
 		flex: 1;

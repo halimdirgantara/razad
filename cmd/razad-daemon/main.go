@@ -13,21 +13,22 @@ import (
 	"time"
 
 	"github.com/razad/razad/internal/api"
+	"github.com/razad/razad/internal/app"
 	"github.com/razad/razad/internal/auth"
 	"github.com/razad/razad/internal/config"
+	"github.com/razad/razad/internal/crypto"
 	"github.com/razad/razad/internal/database"
 	"github.com/razad/razad/internal/org"
+	"github.com/razad/razad/internal/process"
 	"github.com/razad/razad/web"
 )
 
 func main() {
-	// Load configuration
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("failed to load config: %v", err)
 	}
 
-	// Set up structured logger
 	logLevel := slog.LevelInfo
 	if cfg.Debug {
 		logLevel = slog.LevelDebug
@@ -38,7 +39,6 @@ func main() {
 
 	slog.Info("starting razad daemon", "version", cfg.Version, "mode", cfg.Mode)
 
-	// Initialize database
 	db, err := database.Open(cfg.Database)
 	if err != nil {
 		slog.Error("failed to open database", "error", err)
@@ -46,7 +46,6 @@ func main() {
 	}
 	defer db.Close()
 
-	// Run pending migrations
 	if cfg.AutoMigrate {
 		if err := database.Migrate(db); err != nil {
 			slog.Error("failed to run migrations", "error", err)
@@ -54,24 +53,45 @@ func main() {
 		}
 	}
 
-	// Set up auth
+	// --- Auth ---
 	authRepo := auth.NewRepository(db)
 	authSvc := auth.NewService(authRepo, cfg.Auth.SessionTTLMinutes)
 	authHandler := auth.NewHandler(authSvc)
 	authMiddleware := auth.Middleware(authSvc)
 
-	// Set up org
+	// --- Org ---
 	orgRepo := org.NewRepository(db)
 	orgSvc := org.NewService(orgRepo)
 	orgHandler := org.NewHandler(orgSvc)
 
-	// Seed the first admin user if no users exist (self-hosted bootstrap)
+	// --- Crypto ---
+	enc, err := crypto.New(cfg.Auth.SecretKey)
+	if err != nil {
+		slog.Warn("crypto: using derived key from host identity", "error", err)
+		enc, _ = crypto.New("razad-default-dev-key-change-in-production!!")
+	}
+
+	// --- Process Runner ---
+	procRunnerCfg := process.Config{
+		Runner:  "local",
+		DataDir: cfg.DataDir,
+	}
+	if v := os.Getenv("RAZAD_PROCESS_RUNNER"); v == "systemd" {
+		procRunnerCfg.Runner = "systemd"
+	}
+	procRunner := process.New(procRunnerCfg)
+
+	// --- App ---
+	appRepo := app.NewRepository(db)
+	appSvc := app.NewService(appRepo, procRunner, enc, cfg.DataDir)
+	appHandler := app.NewHandler(appSvc)
+
+	// --- Seed admin ---
 	seedAdminIfNeeded(authSvc)
 
-	// Set up API router
+	// --- Router ---
 	router := api.NewRouter()
 
-	// Public routes
 	router.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
@@ -79,7 +99,6 @@ func main() {
 	router.HandleFunc("/api/v1/auth/logout", authHandler.Logout)
 	router.HandleFunc("/api/v1/auth/register", authHandler.Register)
 
-	// Protected routes (require auth middleware)
 	protected := router.Group(authMiddleware)
 	protected.HandleFunc("/api/v1/auth/me", authHandler.Me)
 	protected.Handle("/api/v1/orgs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -93,15 +112,52 @@ func main() {
 		}
 	}))
 
-	// Serve embedded UI (SvelteKit static build) with SPA fallback
-	uiFS, err := fs.Sub(web.UI, "build")
-	if err != nil {
-		slog.Warn("no embedded UI found, UI will not be served", "error", err)
-	} else {
-		router.Handle("/", spaFallbackHandler(uiFS))
-	}
+	// --- App Routes ---
+	protected.Handle("/api/v1/apps", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			appHandler.ListAll(w, r)
+		case http.MethodPost:
+			appHandler.Create(w, r)
+		default:
+			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+	}))
 
-	// Start HTTP server
+	protected.Handle("/api/v1/apps/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Route based on path suffix
+		path := r.URL.Path
+
+		switch {
+		case hasSuffix(path, "/deploy") && r.Method == http.MethodPost:
+			appHandler.Deploy(w, r)
+		case hasSuffix(path, "/stop") && r.Method == http.MethodPost:
+			appHandler.Stop(w, r)
+		case hasSuffix(path, "/restart") && r.Method == http.MethodPost:
+			appHandler.Restart(w, r)
+		case hasSuffix(path, "/env"):
+			appHandler.Env(w, r)
+		case r.Method == http.MethodGet:
+			appHandler.Get(w, r)
+		case r.Method == http.MethodDelete:
+			appHandler.Delete(w, r)
+		default:
+			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+	}))
+
+	protected.Handle("/api/v1/projects/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if hasSuffix(r.URL.Path, "/apps") && r.Method == http.MethodGet {
+			appHandler.List(w, r)
+		} else {
+			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+	}))
+
+	// --- UI ---
+	router.Handle("/", spaFallbackHandler(web.UI))
+
+	// --- Server ---
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,
@@ -111,7 +167,6 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
-	// Graceful shutdown
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
@@ -136,43 +191,80 @@ func main() {
 	slog.Info("shutdown complete")
 }
 
-// seedAdminIfNeeded creates a default admin user if no users exist.
 func seedAdminIfNeeded(svc *auth.Service) {
 	_, err := svc.Register("admin", "admin@razad.local", "razadadmin")
 	if err != nil {
-		// User already exists — ignore
 		return
 	}
 	slog.Info("created default admin user (admin@razad.local / razadadmin)")
 }
 
-// spaFallbackHandler serves static files with SPA fallback to index.html
-// for client-side routing (SvelteKit). API paths are not handled here.
-func spaFallbackHandler(uiFS fs.FS) http.Handler {
-	fileServer := http.FileServer(http.FS(uiFS))
+func hasSuffix(path, suffix string) bool {
+	n := len(path) - len(suffix)
+	return n >= 0 && path[n:] == suffix
+}
 
+func spaFallbackHandler(embedFS fs.FS) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Let API routes pass through to the router
+		// API routes
 		if len(r.URL.Path) >= 4 && r.URL.Path[:4] == "/api" {
 			http.NotFound(w, r)
 			return
 		}
 
-		// Check if the file exists in the embedded FS
-		path := r.URL.Path
-		if path == "/" {
-			path = "/index.html"
+		// Build path within the embed: "build" + request path
+		reqPath := r.URL.Path
+		if reqPath == "/" {
+			reqPath = "/index.html"
 		}
+		embedPath := "build" + reqPath
 
-		f, err := uiFS.Open(path[1:]) // strip leading slash
+		// Try to open the file directly in the embedded FS
+		f, err := embedFS.Open(embedPath)
 		if err == nil {
 			f.Close()
-			fileServer.ServeHTTP(w, r)
-			return
+			// Serve with correct content type
+			data, readErr := fs.ReadFile(embedFS, embedPath)
+			if readErr == nil {
+				ctype := mimeType(embedPath)
+				w.Header().Set("Content-Type", ctype)
+				w.Header().Set("Cache-Control", "public, max-age=3600")
+				w.Write(data)
+				return
+			}
 		}
 
-		// SPA fallback: serve index.html for all non-file routes
-		r.URL.Path = "/"
-		fileServer.ServeHTTP(w, r)
+		// SPA fallback: serve index.html
+		data, fallbackErr := fs.ReadFile(embedFS, "build/index.html")
+		if fallbackErr != nil {
+			http.Error(w, "not found", http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("Cache-Control", "no-cache")
+		w.Write(data)
 	})
+}
+
+func mimeType(path string) string {
+	switch {
+	case hasSuffix(path, ".html"):
+		return "text/html; charset=utf-8"
+	case hasSuffix(path, ".js"):
+		return "application/javascript"
+	case hasSuffix(path, ".css"):
+		return "text/css"
+	case hasSuffix(path, ".json"):
+		return "application/json"
+	case hasSuffix(path, ".png"):
+		return "image/png"
+	case hasSuffix(path, ".svg"):
+		return "image/svg+xml"
+	case hasSuffix(path, ".woff2"):
+		return "font/woff2"
+	case hasSuffix(path, ".woff"):
+		return "font/woff"
+	default:
+		return "application/octet-stream"
+	}
 }

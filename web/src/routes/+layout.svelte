@@ -4,13 +4,45 @@
 	import '$lib/styles/typography.css';
 	import Sidebar from '$lib/components/Sidebar.svelte';
 	import { page } from '$app/stores';
-	import { currentUser, logout as authLogout } from '$lib/stores/auth';
+	import { currentUser, isAuthenticated, checkSession } from '$lib/stores/auth';
 	import { goto } from '$app/navigation';
+	import { onMount } from 'svelte';
 
 	let { children }: { children: import('svelte').Snippet } = $props();
 
+	let authChecked = $state(false);
 	let userMenuOpen = $state(false);
 	let menuRef = $state<HTMLDivElement>();
+
+	onMount(async () => {
+		if ($page.url.pathname === '/login') {
+			authChecked = true;
+			return;
+		}
+
+		const token = localStorage.getItem('razad_token');
+		if (!token) {
+			goto('/login');
+			return;
+		}
+
+		try {
+			const res = await fetch('/api/v1/auth/me', {
+				headers: { 'Authorization': `Bearer ${token}` }
+			});
+			if (!res.ok) {
+				localStorage.removeItem('razad_token');
+				goto('/login');
+				return;
+			}
+			const user = await res.json();
+			currentUser.set(user);
+			isAuthenticated.set(true);
+		} catch {
+			// daemon may be down — keep going
+		}
+		authChecked = true;
+	});
 
 	function toggleMenu(e: Event) {
 		e.stopPropagation();
@@ -25,7 +57,9 @@
 
 	function handleLogout() {
 		userMenuOpen = false;
-		authLogout();
+		isAuthenticated.set(false);
+		currentUser.set(null);
+		localStorage.removeItem('razad_token');
 		fetch('/api/v1/auth/logout', { method: 'POST' }).catch(() => {});
 		goto('/login');
 	}
@@ -35,6 +69,10 @@
 
 {#if $page.url.pathname === '/login'}
 	{@render children()}
+{:else if !authChecked}
+	<div class="loading-screen">
+		<p class="text-muted">Loading...</p>
+	</div>
 {:else}
 	<div class="app-shell">
 		<Sidebar />
@@ -71,6 +109,14 @@
 {/if}
 
 <style>
+	.loading-screen {
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		min-height: 100vh;
+		background: var(--bg);
+		color: var(--text-muted);
+	}
 	.app-shell {
 		display: flex;
 		height: 100vh;
@@ -106,8 +152,6 @@
 		gap: var(--space-4);
 		position: relative;
 	}
-
-	/* ---- User menu in topbar ---- */
 	.user-menu {
 		display: flex;
 		align-items: center;
@@ -117,23 +161,15 @@
 		border-radius: var(--radius-sm);
 		transition: background 0.12s;
 	}
-	.user-menu:hover {
-		background: var(--surface);
-	}
+	.user-menu:hover { background: var(--surface); }
 	.user-avatar-sm {
-		width: 26px;
-		height: 26px;
+		width: 26px; height: 26px;
 		border-radius: 50%;
 		background: var(--surface-3);
 		border: 1px solid var(--border);
 		flex-shrink: 0;
 	}
-	.user-name-sm {
-		font-size: var(--font-size-sm);
-		color: var(--text);
-	}
-
-	/* ---- Dropdown ---- */
+	.user-name-sm { font-size: var(--font-size-sm); color: var(--text); }
 	.user-dropdown {
 		position: absolute;
 		top: calc(100% + 4px);
@@ -152,20 +188,9 @@
 		flex-direction: column;
 		gap: 0.125rem;
 	}
-	.dropdown-name {
-		font-size: var(--font-size-sm);
-		font-weight: var(--font-weight-medium);
-		color: var(--text);
-	}
-	.dropdown-email {
-		font-size: var(--font-size-xs);
-		color: var(--text-muted);
-	}
-	.dropdown-divider {
-		border: none;
-		border-top: 1px solid var(--border);
-		margin: 0;
-	}
+	.dropdown-name { font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); color: var(--text); }
+	.dropdown-email { font-size: var(--font-size-xs); color: var(--text-muted); }
+	.dropdown-divider { border: none; border-top: 1px solid var(--border); margin: 0; }
 	.dropdown-item {
 		display: block;
 		width: 100%;
@@ -178,13 +203,8 @@
 		color: var(--text);
 		transition: background 0.12s;
 	}
-	.dropdown-item:hover {
-		background: var(--surface-3);
-	}
-	.dropdown-item.danger {
-		color: var(--danger);
-	}
-
+	.dropdown-item:hover { background: var(--surface-3); }
+	.dropdown-item.danger { color: var(--danger); }
 	.workspace {
 		flex: 1;
 		overflow-y: auto;

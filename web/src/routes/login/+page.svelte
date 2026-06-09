@@ -131,10 +131,11 @@
 		margin-bottom: var(--space-6);
 	}
 	.login-logo {
-		width: 72px;
-		height: 72px;
+		width: 96px;
+		height: 96px;
 		border-radius: var(--radius-md);
-		margin-bottom: var(--space-3);
+		display: block;
+		margin: 0 auto var(--space-3);
 	}
 	.login-header h1 {
 		font-size: var(--font-size-2xl);
