@@ -1,0 +1,118 @@
+/* =========================================================================
+ * Razad — Base Styles
+ * DESIGN.md v2.0 — §4-5, §17
+ * ========================================================================= */
+
+*,
+*::before,
+*::after {
+	box-sizing: border-box;
+	margin: 0;
+	padding: 0;
+}
+
+html {
+	font-size: 16px;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+	text-rendering: optimizeLegibility;
+}
+
+body {
+	font-family: var(--font-sans);
+	font-size: var(--font-size-base);
+	font-weight: var(--font-weight-normal);
+	line-height: var(--line-height-normal);
+	color: var(--text);
+	background-color: var(--bg);
+	min-height: 100vh;
+	overflow-x: hidden;
+}
+
+/* ---- Links ----------------------------------------------------------- */
+a {
+	color: var(--primary);
+	text-decoration: none;
+	transition: color 0.15s;
+}
+a:hover {
+	color: var(--primary-hover);
+	text-decoration: underline;
+}
+
+/* ---- Focus ----------------------------------------------------------- */
+:focus-visible {
+	outline: 2px solid var(--primary);
+	outline-offset: 2px;
+	border-radius: var(--radius-sm);
+}
+:focus:not(:focus-visible) {
+	outline: none;
+}
+
+/* ---- Selection ------------------------------------------------------- */
+::selection {
+	background: var(--primary);
+	color: var(--bg);
+}
+
+/* ---- Scrollbar ------------------------------------------------------- */
+::-webkit-scrollbar {
+	width: 8px;
+	height: 8px;
+}
+::-webkit-scrollbar-track {
+	background: var(--bg-alt);
+}
+::-webkit-scrollbar-thumb {
+	background: var(--border);
+	border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+	background: var(--border-strong);
+}
+
+/* ---- Images / Media -------------------------------------------------- */
+img, svg, video {
+	max-width: 100%;
+	display: block;
+}
+
+/* ---- Inputs (bare reset) --------------------------------------------- */
+input, select, textarea, button {
+	font-family: inherit;
+	font-size: inherit;
+	color: inherit;
+}
+
+/* ---- Lists ----------------------------------------------------------- */
+ul, ol {
+	list-style: none;
+}
+
+/* ---- Tables (bare) --------------------------------------------------- */
+table {
+	border-collapse: collapse;
+	border-spacing: 0;
+	width: 100%;
+}
+
+/* ---- Utilities ------------------------------------------------------- */
+.text-muted  { color: var(--text-muted); }
+.text-secondary { color: var(--text-secondary); }
+.mono  { font-family: var(--font-mono); }
+.truncate {
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+.sr-only {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	padding: 0;
+	margin: -1px;
+	overflow: hidden;
+	clip: rect(0, 0, 0, 0);
+	border: 0;
+}

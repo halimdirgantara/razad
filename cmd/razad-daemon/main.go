@@ -12,8 +12,11 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/razad/razad/internal/api"
+	"github.com/razad/razad/internal/auth"
 	"github.com/razad/razad/internal/config"
 	"github.com/razad/razad/internal/database"
+	"github.com/razad/razad/internal/org"
 	"github.com/razad/razad/web"
 )
 
@@ -51,15 +54,44 @@ func main() {
 		}
 	}
 
-	// Set up HTTP router
-	mux := http.NewServeMux()
+	// Set up auth
+	authRepo := auth.NewRepository(db)
+	authSvc := auth.NewService(authRepo, cfg.Auth.SessionTTLMinutes)
+	authHandler := auth.NewHandler(authSvc)
+	authMiddleware := auth.Middleware(authSvc)
 
-	// API routes
-	mux.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		fmt.Fprint(w, `{"status":"ok"}`)
+	// Set up org
+	orgRepo := org.NewRepository(db)
+	orgSvc := org.NewService(orgRepo)
+	orgHandler := org.NewHandler(orgSvc)
+
+	// Seed the first admin user if no users exist (self-hosted bootstrap)
+	seedAdminIfNeeded(authSvc)
+
+	// Set up API router
+	router := api.NewRouter()
+
+	// Public routes
+	router.HandleFunc("/api/v1/health", func(w http.ResponseWriter, r *http.Request) {
+		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 	})
+	router.HandleFunc("/api/v1/auth/login", authHandler.Login)
+	router.HandleFunc("/api/v1/auth/logout", authHandler.Logout)
+	router.HandleFunc("/api/v1/auth/register", authHandler.Register)
+
+	// Protected routes (require auth middleware)
+	protected := router.Group(authMiddleware)
+	protected.HandleFunc("/api/v1/auth/me", authHandler.Me)
+	protected.Handle("/api/v1/orgs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			orgHandler.List(w, r)
+		case http.MethodPost:
+			orgHandler.Create(w, r)
+		default:
+			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+	}))
 
 	// Serve embedded UI (SvelteKit static build)
 	uiFS, err := fs.Sub(web.UI, "build")
@@ -67,14 +99,14 @@ func main() {
 		slog.Warn("no embedded UI found, UI will not be served", "error", err)
 	} else {
 		fileServer := http.FileServer(http.FS(uiFS))
-		mux.Handle("/", fileServer)
+		router.Handle("/", fileServer)
 	}
 
 	// Start HTTP server
 	addr := fmt.Sprintf(":%d", cfg.Port)
 	srv := &http.Server{
 		Addr:         addr,
-		Handler:      mux,
+		Handler:      router,
 		ReadTimeout:  15 * time.Second,
 		WriteTimeout: 15 * time.Second,
 		IdleTimeout:  60 * time.Second,
@@ -103,4 +135,14 @@ func main() {
 		os.Exit(1)
 	}
 	slog.Info("shutdown complete")
+}
+
+// seedAdminIfNeeded creates a default admin user if no users exist.
+func seedAdminIfNeeded(svc *auth.Service) {
+	_, err := svc.Register("admin", "admin@razad.local", "razadadmin")
+	if err != nil {
+		// User already exists — ignore
+		return
+	}
+	slog.Info("created default admin user (admin@razad.local / razadadmin)")
 }

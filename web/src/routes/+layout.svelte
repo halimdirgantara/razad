@@ -1,43 +1,71 @@
-<nav>
-	<div class="brand">Razad</div>
-	<div class="nav-links">
-		<a href="/">Dashboard</a>
-		<a href="/apps">Apps</a>
-		<a href="/servers">Servers</a>
-		<a href="/settings">Settings</a>
-	</div>
-</nav>
+<script lang="ts">
+	import '$lib/styles/theme.css';
+	import '$lib/styles/base.css';
+	import '$lib/styles/typography.css';
+	import Sidebar from '$lib/components/Sidebar.svelte';
 
-<main>
-	{@render children()}
-</main>
+	let { children }: { children: import('svelte').Snippet } = $props();
+</script>
+
+<div class="app-shell">
+	<Sidebar />
+	<div class="main-area">
+		<header class="topbar">
+			<span class="topbar-title">Razad</span>
+			<div class="topbar-right">
+				<span class="topbar-status ok">● System Healthy</span>
+			</div>
+		</header>
+		<main class="workspace">
+			{@render children()}
+		</main>
+	</div>
+</div>
 
 <style>
-	nav {
+	.app-shell {
+		display: flex;
+		height: 100vh;
+		overflow: hidden;
+	}
+	.main-area {
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+		background: var(--bg);
+	}
+	.topbar {
 		display: flex;
 		align-items: center;
-		padding: 0 1.5rem;
-		height: 3rem;
-		background: #1a1a2e;
-		color: #e0e0e0;
-		gap: 2rem;
+		justify-content: space-between;
+		height: var(--topbar-height);
+		padding: 0 var(--space-6);
+		background: var(--bg-alt);
+		border-bottom: 1px solid var(--border);
+		flex-shrink: 0;
 	}
-	.brand {
-		font-weight: 700;
-		font-size: 1.1rem;
+	.topbar-title {
+		font-weight: var(--font-weight-bold);
+		font-size: var(--font-size-base);
+		color: var(--text);
+		display: none; /* shown on small screens instead of sidebar brand */
 	}
-	.nav-links {
+	.topbar-right {
 		display: flex;
-		gap: 1rem;
+		align-items: center;
+		gap: var(--space-4);
 	}
-	.nav-links a {
-		color: #a0a0b0;
-		text-decoration: none;
+	.topbar-status {
+		font-size: var(--font-size-xs);
+		color: var(--text-muted);
 	}
-	.nav-links a:hover {
-		color: #ffffff;
+	.topbar-status.ok {
+		color: var(--success);
 	}
-	main {
-		padding: 1.5rem;
+	.workspace {
+		flex: 1;
+		overflow-y: auto;
+		padding: var(--space-6);
 	}
 </style>

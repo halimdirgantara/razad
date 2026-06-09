@@ -1,0 +1,82 @@
+/* =========================================================================
+ * Razad — Ocean Breeze Theme
+ * DESIGN.md v2.0 — §3-4
+ * =========================================================================
+ * Deep dark ocean background, soft teal/blue accents, cool-neutral surfaces.
+ * Tokens prefixed with -- for use throughout the app.
+ * ========================================================================= */
+
+:root {
+	/* ------------------------------------------------------------------ */
+	/*  Core Colors — §4.1                                                 */
+	/* ------------------------------------------------------------------ */
+	--bg:              #04161D;
+	--bg-alt:          #061B23;
+	--surface:         #0A2631;
+	--surface-2:       #113645;
+	--surface-3:       #163F4E;
+	--border:          #255567;
+	--border-strong:   #35758A;
+	--text:            #EAF7FA;
+	--text-secondary:  #A9C8D1;
+	--text-muted:      #7F9EAA;
+	--primary:         #43B7C9;
+	--primary-hover:   #5FC8D8;
+	--accent:          #8FE3E6;
+	--success:         #49C98A;
+	--warning:         #F0B35A;
+	--danger:          #E86A6A;
+	--info:            #5DAEEA;
+
+	/* ------------------------------------------------------------------ */
+	/*  Extended Palette — similar tones, lower/lighter                    */
+	/* ------------------------------------------------------------------ */
+	--success-bg:      #0A2E1D;
+	--warning-bg:      #2E220A;
+	--danger-bg:       #2E0A0A;
+	--info-bg:         #0A1C2E;
+	--primary-bg:      #0A2A30;
+
+	/* ------------------------------------------------------------------ */
+	/*  Typography — §5                                                    */
+	/* ------------------------------------------------------------------ */
+	--font-sans:       'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+	--font-mono:       'JetBrains Mono', 'Fira Code', 'Cascadia Code', 'Consolas', monospace;
+	--font-size-xs:    0.75rem;   /* 12px — meta, timestamps */
+	--font-size-sm:    0.8125rem; /* 13px — table cells, labels */
+	--font-size-base:  0.875rem;  /* 14px — body */
+	--font-size-lg:    1rem;      /* 16px — H3 */
+	--font-size-xl:    1.25rem;   /* 20px — H2 */
+	--font-size-2xl:   1.5rem;    /* 24px — H1 */
+	--font-weight-normal: 400;
+	--font-weight-medium: 500;
+	--font-weight-semibold: 600;
+	--font-weight-bold: 700;
+	--line-height-tight: 1.25;
+	--line-height-normal: 1.5;
+
+	/* ------------------------------------------------------------------ */
+	/*  Spacing                                                             */
+	/* ------------------------------------------------------------------ */
+	--space-1:   0.25rem;  /*  4px */
+	--space-2:   0.5rem;   /*  8px */
+	--space-3:   0.75rem;  /* 12px */
+	--space-4:   1rem;     /* 16px */
+	--space-5:   1.25rem;  /* 20px */
+	--space-6:   1.5rem;   /* 24px */
+	--space-8:   2rem;     /* 32px */
+	--space-10:  2.5rem;   /* 40px */
+	--space-12:  3rem;     /* 48px */
+
+	/* ------------------------------------------------------------------ */
+	/*  Layout                                                              */
+	/* ------------------------------------------------------------------ */
+	--sidebar-width: 220px;
+	--topbar-height: 48px;
+	--radius-sm: 4px;
+	--radius-md: 6px;
+	--radius-lg: 8px;
+	--shadow-sm: 0 1px 2px rgba(0,0,0,0.3);
+	--shadow-md: 0 2px 8px rgba(0,0,0,0.4);
+	--shadow-lg: 0 4px 16px rgba(0,0,0,0.5);
+}
