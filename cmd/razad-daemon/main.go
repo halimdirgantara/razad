@@ -20,6 +20,8 @@ import (
 	"github.com/razad/razad/internal/database"
 	"github.com/razad/razad/internal/org"
 	"github.com/razad/razad/internal/process"
+	"github.com/razad/razad/internal/server"
+	websocketpkg "github.com/razad/razad/internal/websocket"
 	"github.com/razad/razad/web"
 )
 
@@ -81,6 +83,12 @@ func main() {
 	}
 	procRunner := process.New(procRunnerCfg)
 
+	// --- Health Collector ---
+	healthCollector := server.NewCollector(cfg.DataDir)
+
+	// --- WebSocket Hub ---
+	wsHub := websocketpkg.NewHub()
+
 	// --- App ---
 	appRepo := app.NewRepository(db)
 	appSvc := app.NewService(appRepo, procRunner, enc, cfg.DataDir)
@@ -100,6 +108,10 @@ func main() {
 	router.HandleFunc("/api/v1/auth/register", authHandler.Register)
 
 	protected := router.Group(authMiddleware)
+	protected.HandleFunc("/api/v1/health/stats", func(w http.ResponseWriter, r *http.Request) {
+		api.WriteJSON(w, http.StatusOK, healthCollector.Collect())
+	})
+	protected.HandleFunc("/ws", wsHub.HandleConnection)
 	protected.HandleFunc("/api/v1/auth/me", authHandler.Me)
 	protected.Handle("/api/v1/orgs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {

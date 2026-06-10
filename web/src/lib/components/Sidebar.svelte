@@ -17,11 +17,11 @@
 	];
 
 	const sections = [
-		{ name: 'Overview', items: [navItems[0], navItems[10]] },
+		{ name: 'Overview', items: [navItems[0]] },
 		{ name: 'Infrastructure', items: navItems.slice(1, 6) },
 		{ name: 'Observability', items: navItems.slice(6, 9) },
-		{ name: 'Automation', items: navItems.slice(9, 11) },
-		{ name: 'System', items: navItems.slice(11) },
+		{ name: 'Automation', items: [navItems[9], navItems[10]] },
+		{ name: 'System', items: [navItems[11]] },
 	];
 </script>
 
