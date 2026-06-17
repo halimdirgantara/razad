@@ -8,6 +8,8 @@
 **Primary Stack:** Go backend, SvelteKit frontend, systemd-native execution  
 **License Assumption:** AGPLv3
 
+> **Current implementation note:** the repository currently implements the local/self-hosted core (auth, orgs, projects, apps, encrypted env vars, local process management, health, logs, and embedded UI). The cloud, AI, proxy/SSL, billing, and managed-infrastructure sections in this document describe roadmap scope unless explicitly implemented in code.
+
 ---
 
 ## 1. Purpose

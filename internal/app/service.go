@@ -8,14 +8,15 @@ import (
 	"os"
 	"path/filepath"
 
+	"github.com/razad/razad/internal/audit"
 	"github.com/razad/razad/internal/crypto"
 	"github.com/razad/razad/internal/domain"
 	"github.com/razad/razad/internal/process"
 )
 
 var (
-	ErrNotFound    = errors.New("app: not found")
-	ErrNotRunning  = errors.New("app: not running")
+	ErrNotFound     = errors.New("app: not found")
+	ErrNotRunning   = errors.New("app: not running")
 	ErrAccessDenied = errors.New("app: access denied")
 )
 
@@ -24,6 +25,7 @@ type Service struct {
 	repo    *Repository
 	proc    process.Runner
 	enc     *crypto.Encrypter
+	audit   *audit.Service
 	dataDir string
 }
 
@@ -37,8 +39,22 @@ func NewService(repo *Repository, proc process.Runner, enc *crypto.Encrypter, da
 	}
 }
 
+// SetAuditor attaches an audit recorder to the service.
+func (s *Service) SetAuditor(auditor *audit.Service) {
+	s.audit = auditor
+}
+
+func (s *Service) recordAudit(ctx context.Context, actorID, action, entityType, entityID string, metadata map[string]any) {
+	if s.audit == nil {
+		return
+	}
+	if err := s.audit.Record(ctx, actorID, action, entityType, entityID, metadata); err != nil {
+		slog.Warn("audit write failed", "action", action, "entity_type", entityType, "entity_id", entityID, "error", err)
+	}
+}
+
 // Create creates a new application record.
-func (s *Service) Create(req CreateAppRequest) (*domain.App, error) {
+func (s *Service) Create(userID string, req CreateAppRequest) (*domain.App, error) {
 	if req.Name == "" {
 		return nil, fmt.Errorf("app: name is required")
 	}
@@ -49,37 +65,48 @@ func (s *Service) Create(req CreateAppRequest) (*domain.App, error) {
 	runtime := req.Runtime
 	startCmd := req.StartCmd
 
-	return s.repo.Create(req.ProjectID, req.Name, req.GitURL, runtime, startCmd)
+	app, err := s.repo.CreateForUser(userID, req.ProjectID, req.Name, req.GitURL, runtime, startCmd)
+	if err != nil {
+		return nil, err
+	}
+	s.recordAudit(context.Background(), userID, "app.create", "app", app.ID, map[string]any{
+		"project_id": app.ProjectID,
+		"name":       app.Name,
+	})
+	return app, nil
 }
 
-// Get retrieves an app by ID.
-func (s *Service) Get(id string) (*domain.App, error) {
-	return s.repo.FindByID(id)
+// Get retrieves an app by ID for the given user.
+func (s *Service) Get(userID, id string) (*domain.App, error) {
+	app, err := s.repo.FindByIDForUser(userID, id)
+	if err != nil {
+		return nil, ErrNotFound
+	}
+	return app, nil
 }
 
-// ListAll returns all apps across all projects.
-func (s *Service) ListAll() ([]domain.App, error) {
-	return s.repo.ListAll()
+// ListAll returns apps visible to the given user.
+func (s *Service) ListAll(userID string) ([]domain.App, error) {
+	return s.repo.ListAllForUser(userID)
 }
 
 // ListByProject returns all apps in a project.
-func (s *Service) ListByProject(projectID string) ([]domain.App, error) {
-	return s.repo.ListByProject(projectID)
+func (s *Service) ListByProject(userID, projectID string) ([]domain.App, error) {
+	return s.repo.ListByProjectForUser(userID, projectID)
 }
 
 // Deploy triggers a deployment for the given app.
-func (s *Service) Deploy(ctx context.Context, appID string) (*domain.App, error) {
-	app, err := s.repo.FindByID(appID)
+func (s *Service) Deploy(ctx context.Context, userID, appID string) (*domain.App, error) {
+	app, err := s.repo.FindByIDForUser(userID, appID)
 	if err != nil {
 		return nil, ErrNotFound
 	}
 
-	// Update status to deploying
 	if err := s.repo.UpdateStatus(appID, "deploying"); err != nil {
 		return nil, err
 	}
+	s.recordAudit(ctx, userID, "app.deploy.start", "app", appID, map[string]any{"status": "deploying"})
 
-	// Create deployment record
 	deployment, err := s.repo.CreateDeployment(appID, "latest")
 	if err != nil {
 		s.repo.UpdateStatus(appID, "failed")
@@ -89,7 +116,6 @@ func (s *Service) Deploy(ctx context.Context, appID string) (*domain.App, error)
 	appDir := filepath.Join(s.dataDir, "apps", appID)
 	workDir := appDir
 
-	// Ensure app directory exists
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		s.repo.UpdateDeploymentStatus(deployment.ID, "failed", fmt.Sprintf("mkdir: %v", err))
 		s.repo.UpdateStatus(appID, "failed")
@@ -101,7 +127,6 @@ func (s *Service) Deploy(ctx context.Context, appID string) (*domain.App, error)
 		startCommand = "echo 'no start command configured'"
 	}
 
-	// Start the process
 	logLine := fmt.Sprintf("Starting: %s in %s", startCommand, workDir)
 	slog.Info("deploy: starting app", "app", appID, "cmd", startCommand)
 
@@ -114,26 +139,28 @@ func (s *Service) Deploy(ctx context.Context, appID string) (*domain.App, error)
 	s.repo.UpdateDeploymentStatus(deployment.ID, "success", logLine)
 	s.repo.UpdateStatus(appID, "running")
 
-	updated, _ := s.repo.FindByID(appID)
+	updated, _ := s.repo.FindByIDForUser(userID, appID)
 	return updated, nil
 }
 
 // Stop stops a running application.
-func (s *Service) Stop(ctx context.Context, appID string) (*domain.App, error) {
+func (s *Service) Stop(ctx context.Context, userID, appID string) (*domain.App, error) {
+	if _, err := s.repo.FindByIDForUser(userID, appID); err != nil {
+		return nil, ErrNotFound
+	}
 	if err := s.proc.Stop(ctx, appID); err != nil {
 		return nil, fmt.Errorf("app: stop: %w", err)
 	}
-
 	if err := s.repo.UpdateStatus(appID, "stopped"); err != nil {
 		return nil, err
 	}
-
-	return s.repo.FindByID(appID)
+	s.recordAudit(ctx, userID, "app.stop", "app", appID, map[string]any{"status": "stopped"})
+	return s.repo.FindByIDForUser(userID, appID)
 }
 
 // Restart restarts a running application.
-func (s *Service) Restart(ctx context.Context, appID string) (*domain.App, error) {
-	app, err := s.repo.FindByID(appID)
+func (s *Service) Restart(ctx context.Context, userID, appID string) (*domain.App, error) {
+	app, err := s.repo.FindByIDForUser(userID, appID)
 	if err != nil {
 		return nil, ErrNotFound
 	}
@@ -141,8 +168,8 @@ func (s *Service) Restart(ctx context.Context, appID string) (*domain.App, error
 	if err := s.proc.Restart(ctx, appID); err != nil {
 		return nil, fmt.Errorf("app: restart: %w", err)
 	}
+	s.recordAudit(ctx, userID, "app.restart", "app", appID, map[string]any{"status": "restarting"})
 
-	// Re-start after restart (Restart just stops in local runner)
 	startCmd := app.StartCmd
 	if startCmd == "" {
 		startCmd = "echo 'no start command'"
@@ -155,17 +182,24 @@ func (s *Service) Restart(ctx context.Context, appID string) (*domain.App, error
 	}
 
 	s.repo.UpdateStatus(appID, "running")
-	return s.repo.FindByID(appID)
+	return s.repo.FindByIDForUser(userID, appID)
 }
 
 // Delete removes an application.
-func (s *Service) Delete(ctx context.Context, appID string) error {
+func (s *Service) Delete(ctx context.Context, userID, appID string) error {
+	if _, err := s.repo.FindByIDForUser(userID, appID); err != nil {
+		return ErrNotFound
+	}
 	_ = s.proc.Stop(ctx, appID)
+	s.recordAudit(ctx, userID, "app.delete", "app", appID, nil)
 	return s.repo.Delete(appID)
 }
 
 // SetEnvVars sets environment variables for an app (encrypted at rest).
-func (s *Service) SetEnvVars(appID string, vars []EnvVarInput) error {
+func (s *Service) SetEnvVars(userID, appID string, vars []EnvVarInput) error {
+	if _, err := s.repo.FindByIDForUser(userID, appID); err != nil {
+		return ErrNotFound
+	}
 	for _, v := range vars {
 		encrypted, err := s.enc.Encrypt([]byte(v.Value))
 		if err != nil {
@@ -175,10 +209,24 @@ func (s *Service) SetEnvVars(appID string, vars []EnvVarInput) error {
 			return err
 		}
 	}
+	s.recordAudit(context.Background(), userID, "app.env.update", "app", appID, map[string]any{"keys": envKeys(vars)})
 	return nil
 }
 
 // GetEnvVarKeys returns the list of env var keys (without values).
-func (s *Service) GetEnvVarKeys(appID string) ([]domain.AppEnvVar, error) {
+func (s *Service) GetEnvVarKeys(userID, appID string) ([]domain.AppEnvVar, error) {
+	if _, err := s.repo.FindByIDForUser(userID, appID); err != nil {
+		return nil, ErrNotFound
+	}
 	return s.repo.ListEnvVars(appID)
+}
+
+func envKeys(vars []EnvVarInput) []string {
+	keys := make([]string, 0, len(vars))
+	for _, v := range vars {
+		if v.Key != "" {
+			keys = append(keys, v.Key)
+		}
+	}
+	return keys
 }

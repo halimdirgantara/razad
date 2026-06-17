@@ -1,10 +1,13 @@
 package org
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"regexp"
 	"strings"
+
+	"github.com/razad/razad/internal/audit"
 )
 
 var (
@@ -18,12 +21,27 @@ var slugRegex = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{1,48})[a-z0-9]$`)
 
 // Service handles organization business logic.
 type Service struct {
-	repo *Repository
+	repo   *Repository
+	audit  *audit.Service
 }
 
 // NewService creates an org service.
 func NewService(repo *Repository) *Service {
 	return &Service{repo: repo}
+}
+
+// SetAuditor attaches an audit recorder to the service.
+func (s *Service) SetAuditor(auditor *audit.Service) {
+	s.audit = auditor
+}
+
+func (s *Service) record(actorID, action, entityType, entityID string, metadata map[string]any) {
+	if s.audit == nil {
+		return
+	}
+	if err := s.audit.Record(context.Background(), actorID, action, entityType, entityID, metadata); err != nil {
+		// Intentionally ignore audit failures to keep primary workflows available.
+	}
 }
 
 // Create creates a new organization and adds the creator as admin.
@@ -50,6 +68,7 @@ func (s *Service) Create(name, slug, creatorUserID string) (*Organization, error
 		return nil, fmt.Errorf("org: add creator: %w", err)
 	}
 
+	s.record(creatorUserID, "org.create", "organization", org.ID, map[string]any{"slug": org.Slug, "name": org.Name})
 	return org, nil
 }
 
@@ -88,5 +107,8 @@ func (s *Service) AddMember(orgID, actorID, targetUserID, role string) error {
 	}
 
 	_, err = s.repo.AddMember(orgID, targetUserID, role)
+	if err == nil {
+		s.record(actorID, "org.member.add", "organization", orgID, map[string]any{"target_user_id": targetUserID, "role": role})
+	}
 	return err
 }

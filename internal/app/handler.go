@@ -28,7 +28,7 @@ func (h *Handler) ListAll(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	apps, err := h.svc.ListAll()
+	apps, err := h.svc.ListAll(userID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "list_failed", "could not list apps")
 		return
@@ -55,9 +55,9 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, err := h.svc.Create(req)
+	app, err := h.svc.Create(userID, req)
 	if err != nil {
-		api.WriteError(w, http.StatusConflict, "create_failed", err.Error())
+		api.WriteError(w, http.StatusForbidden, "create_failed", err.Error())
 		return
 	}
 
@@ -79,7 +79,7 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, err := h.svc.Get(id)
+	app, err := h.svc.Get(userID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "not_found", "app not found")
 		return
@@ -96,14 +96,13 @@ func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract project ID from /api/v1/projects/{id}/apps
 	projectID := extractProjectID(r.URL.Path)
 	if projectID == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing project id")
 		return
 	}
 
-	apps, err := h.svc.ListByProject(projectID)
+	apps, err := h.svc.ListByProject(userID, projectID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "list_failed", "could not list apps")
 		return
@@ -130,9 +129,9 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	app, err := h.svc.Deploy(r.Context(), id)
+	app, err := h.svc.Deploy(r.Context(), userID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "deploy_failed", err.Error())
+		api.WriteError(w, http.StatusForbidden, "deploy_failed", err.Error())
 		return
 	}
 
@@ -141,15 +140,21 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 
 // Stop handles POST /api/v1/apps/{id}/stop.
 func (h *Handler) Stop(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+
 	id := extractID(r.URL.Path, "/api/v1/apps/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing app id")
 		return
 	}
 
-	app, err := h.svc.Stop(r.Context(), id)
+	app, err := h.svc.Stop(r.Context(), userID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "stop_failed", err.Error())
+		api.WriteError(w, http.StatusForbidden, "stop_failed", err.Error())
 		return
 	}
 
@@ -158,15 +163,21 @@ func (h *Handler) Stop(w http.ResponseWriter, r *http.Request) {
 
 // Restart handles POST /api/v1/apps/{id}/restart.
 func (h *Handler) Restart(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+
 	id := extractID(r.URL.Path, "/api/v1/apps/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing app id")
 		return
 	}
 
-	app, err := h.svc.Restart(r.Context(), id)
+	app, err := h.svc.Restart(r.Context(), userID, id)
 	if err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "restart_failed", err.Error())
+		api.WriteError(w, http.StatusForbidden, "restart_failed", err.Error())
 		return
 	}
 
@@ -175,14 +186,20 @@ func (h *Handler) Restart(w http.ResponseWriter, r *http.Request) {
 
 // Delete handles DELETE /api/v1/apps/{id}.
 func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+
 	id := extractID(r.URL.Path, "/api/v1/apps/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing app id")
 		return
 	}
 
-	if err := h.svc.Delete(r.Context(), id); err != nil {
-		api.WriteError(w, http.StatusInternalServerError, "delete_failed", err.Error())
+	if err := h.svc.Delete(r.Context(), userID, id); err != nil {
+		api.WriteError(w, http.StatusForbidden, "delete_failed", err.Error())
 		return
 	}
 
@@ -191,6 +208,12 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 
 // Env handles GET/PUT /api/v1/apps/{id}/env.
 func (h *Handler) Env(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+
 	id := extractID(r.URL.Path, "/api/v1/apps/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing app id")
@@ -199,9 +222,9 @@ func (h *Handler) Env(w http.ResponseWriter, r *http.Request) {
 
 	switch r.Method {
 	case http.MethodGet:
-		vars, err := h.svc.GetEnvVarKeys(id)
+		vars, err := h.svc.GetEnvVarKeys(userID, id)
 		if err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "env_failed", err.Error())
+			api.WriteError(w, http.StatusForbidden, "env_failed", err.Error())
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, vars)
@@ -212,8 +235,8 @@ func (h *Handler) Env(w http.ResponseWriter, r *http.Request) {
 			api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 			return
 		}
-		if err := h.svc.SetEnvVars(id, inputs); err != nil {
-			api.WriteError(w, http.StatusInternalServerError, "env_failed", err.Error())
+		if err := h.svc.SetEnvVars(userID, id, inputs); err != nil {
+			api.WriteError(w, http.StatusForbidden, "env_failed", err.Error())
 			return
 		}
 		api.WriteJSON(w, http.StatusOK, map[string]string{"status": "saved"})
@@ -223,25 +246,27 @@ func (h *Handler) Env(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// ----- helpers -----
-
-// extractID extracts the resource ID from a URL path.
-// e.g. /api/v1/apps/abc123 -> abc123
 func extractID(path, prefix string) string {
-	trimmed := strings.TrimPrefix(path, prefix)
-	parts := strings.Split(trimmed, "/")
-	if len(parts) > 0 && parts[0] != "" {
-		return parts[0]
+	rest := strings.TrimPrefix(path, prefix)
+	if rest == path || rest == "" {
+		return ""
 	}
-	return ""
+	parts := strings.Split(rest, "/")
+	if len(parts) == 0 {
+		return ""
+	}
+	return parts[0]
 }
 
-// extractProjectID extracts project ID from paths like /api/v1/projects/{id}/apps.
 func extractProjectID(path string) string {
-	parts := strings.Split(strings.TrimPrefix(path, "/api/v1/"), "/")
-	// projects/{id}/apps
-	if len(parts) >= 3 && parts[0] == "projects" && parts[2] == "apps" {
-		return parts[1]
+	// Extract project ID from /api/v1/projects/{id}/apps
+	parts := strings.Split(path, "/")
+	if len(parts) < 6 {
+		return ""
+	}
+	// /api/v1/projects/{id}/apps
+	if parts[1] == "api" && parts[2] == "v1" && parts[3] == "projects" {
+		return parts[4]
 	}
 	return ""
 }

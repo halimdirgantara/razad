@@ -15,6 +15,7 @@ import (
 
 	"github.com/razad/razad/internal/api"
 	"github.com/razad/razad/internal/app"
+	"github.com/razad/razad/internal/audit"
 	"github.com/razad/razad/internal/auth"
 	"github.com/razad/razad/internal/config"
 	"github.com/razad/razad/internal/crypto"
@@ -56,6 +57,9 @@ func main() {
 		}
 	}
 
+	// --- Audit ---
+	auditSvc := audit.NewService(db)
+
 	// --- Auth ---
 	authRepo := auth.NewRepository(db)
 	authSvc := auth.NewService(authRepo, cfg.Auth.SessionTTLMinutes)
@@ -65,6 +69,7 @@ func main() {
 	// --- Org ---
 	orgRepo := org.NewRepository(db)
 	orgSvc := org.NewService(orgRepo)
+	orgSvc.SetAuditor(auditSvc)
 	orgHandler := org.NewHandler(orgSvc)
 
 	// --- Crypto ---
@@ -93,6 +98,7 @@ func main() {
 	// --- App ---
 	appRepo := app.NewRepository(db)
 	appSvc := app.NewService(appRepo, procRunner, enc, cfg.DataDir)
+	appSvc.SetAuditor(auditSvc)
 	appHandler := app.NewHandler(appSvc)
 
 	// --- Seed admin ---

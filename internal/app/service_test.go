@@ -12,6 +12,13 @@ import (
 	"github.com/razad/razad/internal/process"
 )
 
+const (
+	testUserID    = "user-1"
+	testOrgID     = "org-1"
+	testProjectID = "project-1"
+	otherUserID   = "user-2"
+)
+
 func setupTestDB(t *testing.T) *sql.DB {
 	t.Helper()
 	f := "/tmp/razad-app-test-" + t.Name() + ".db"
@@ -24,7 +31,22 @@ func setupTestDB(t *testing.T) *sql.DB {
 	if err := database.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	seedTenantData(t, db)
 	return db
+}
+
+func seedTenantData(t *testing.T, db *sql.DB) {
+	t.Helper()
+	mustExec := func(q string, args ...any) {
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("seed db: %v", err)
+		}
+	}
+	mustExec(`INSERT INTO users (id, name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`, testUserID, "Test User", "test@example.com", "hash")
+	mustExec(`INSERT INTO users (id, name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`, otherUserID, "Other User", "other@example.com", "hash")
+	mustExec(`INSERT INTO organizations (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`, testOrgID, "Test Org", "test-org")
+	mustExec(`INSERT INTO organization_members (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, ?, datetime('now'))`, "member-1", testOrgID, testUserID, "admin")
+	mustExec(`INSERT INTO projects (id, organization_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`, testProjectID, testOrgID, "Test Project", "test-project")
 }
 
 func setupTestService(t *testing.T) *Service {
@@ -39,9 +61,9 @@ func setupTestService(t *testing.T) *Service {
 func TestCreateApp_Success(t *testing.T) {
 	svc := setupTestService(t)
 
-	app, err := svc.Create(CreateAppRequest{
+	app, err := svc.Create(testUserID, CreateAppRequest{
 		Name:      "my-app",
-		ProjectID: "test-project",
+		ProjectID: testProjectID,
 		Runtime:   "node",
 		StartCmd:  "npm start",
 	})
@@ -57,11 +79,23 @@ func TestCreateApp_Success(t *testing.T) {
 	}
 }
 
+func TestCreateApp_DeniedForForeignTenant(t *testing.T) {
+	svc := setupTestService(t)
+
+	_, err := svc.Create(otherUserID, CreateAppRequest{
+		Name:      "my-app",
+		ProjectID: testProjectID,
+	})
+	if err == nil {
+		t.Fatal("expected error for foreign tenant")
+	}
+}
+
 func TestCreateApp_MissingName(t *testing.T) {
 	svc := setupTestService(t)
 
-	_, err := svc.Create(CreateAppRequest{
-		ProjectID: "test-project",
+	_, err := svc.Create(testUserID, CreateAppRequest{
+		ProjectID: testProjectID,
 	})
 	if err == nil {
 		t.Error("expected error for missing name")
@@ -71,7 +105,7 @@ func TestCreateApp_MissingName(t *testing.T) {
 func TestGetApp_NotFound(t *testing.T) {
 	svc := setupTestService(t)
 
-	_, err := svc.Get("nonexistent")
+	_, err := svc.Get(testUserID, "nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent app")
 	}
@@ -80,11 +114,11 @@ func TestGetApp_NotFound(t *testing.T) {
 func TestGetApp_Success(t *testing.T) {
 	svc := setupTestService(t)
 
-	created, _ := svc.Create(CreateAppRequest{
-		Name: "find-me", ProjectID: "p1", Runtime: "go",
+	created, _ := svc.Create(testUserID, CreateAppRequest{
+		Name: "find-me", ProjectID: testProjectID, Runtime: "go",
 	})
 
-	app, err := svc.Get(created.ID)
+	app, err := svc.Get(testUserID, created.ID)
 	if err != nil {
 		t.Fatalf("Get failed: %v", err)
 	}
@@ -94,10 +128,22 @@ func TestGetApp_Success(t *testing.T) {
 	}
 }
 
+func TestGetApp_DeniedForForeignTenant(t *testing.T) {
+	svc := setupTestService(t)
+
+	created, _ := svc.Create(testUserID, CreateAppRequest{
+		Name: "private", ProjectID: testProjectID, Runtime: "go",
+	})
+
+	if _, err := svc.Get(otherUserID, created.ID); err == nil {
+		t.Fatal("expected access denied")
+	}
+}
+
 func TestListByProject_Empty(t *testing.T) {
 	svc := setupTestService(t)
 
-	apps, err := svc.ListByProject("empty-project")
+	apps, err := svc.ListByProject(testUserID, testProjectID)
 	if err != nil {
 		t.Fatalf("List failed: %v", err)
 	}
@@ -111,13 +157,13 @@ func TestDeployAndStop(t *testing.T) {
 	svc := setupTestService(t)
 	ctx := context.Background()
 
-	created, _ := svc.Create(CreateAppRequest{
-		Name: "deploy-test", ProjectID: "p1", Runtime: "node",
+	created, _ := svc.Create(testUserID, CreateAppRequest{
+		Name: "deploy-test", ProjectID: testProjectID, Runtime: "node",
 		StartCmd: "echo hello",
 	})
 
 	// Deploy
-	deployed, err := svc.Deploy(ctx, created.ID)
+	deployed, err := svc.Deploy(ctx, testUserID, created.ID)
 	if err != nil {
 		t.Fatalf("Deploy failed: %v", err)
 	}
@@ -127,7 +173,7 @@ func TestDeployAndStop(t *testing.T) {
 	}
 
 	// Stop
-	stopped, err := svc.Stop(ctx, created.ID)
+	stopped, err := svc.Stop(ctx, testUserID, created.ID)
 	if err != nil {
 		t.Fatalf("Stop failed: %v", err)
 	}
@@ -141,15 +187,15 @@ func TestDeleteApp(t *testing.T) {
 	svc := setupTestService(t)
 	ctx := context.Background()
 
-	created, _ := svc.Create(CreateAppRequest{
-		Name: "delete-me", ProjectID: "p1", Runtime: "python",
+	created, _ := svc.Create(testUserID, CreateAppRequest{
+		Name: "delete-me", ProjectID: testProjectID, Runtime: "python",
 	})
 
-	if err := svc.Delete(ctx, created.ID); err != nil {
+	if err := svc.Delete(ctx, testUserID, created.ID); err != nil {
 		t.Fatalf("Delete failed: %v", err)
 	}
 
-	_, err := svc.Get(created.ID)
+	_, err := svc.Get(testUserID, created.ID)
 	if err == nil {
 		t.Error("expected error after delete")
 	}
@@ -158,11 +204,11 @@ func TestDeleteApp(t *testing.T) {
 func TestSetEnvVars(t *testing.T) {
 	svc := setupTestService(t)
 
-	created, _ := svc.Create(CreateAppRequest{
-		Name: "env-test", ProjectID: "p1", Runtime: "node",
+	created, _ := svc.Create(testUserID, CreateAppRequest{
+		Name: "env-test", ProjectID: testProjectID, Runtime: "node",
 	})
 
-	err := svc.SetEnvVars(created.ID, []EnvVarInput{
+	err := svc.SetEnvVars(testUserID, created.ID, []EnvVarInput{
 		{Key: "DATABASE_URL", Value: "postgres://localhost"},
 		{Key: "API_KEY", Value: "secret-123"},
 	})
@@ -170,7 +216,7 @@ func TestSetEnvVars(t *testing.T) {
 		t.Fatalf("SetEnvVars failed: %v", err)
 	}
 
-	vars, err := svc.GetEnvVarKeys(created.ID)
+	vars, err := svc.GetEnvVarKeys(testUserID, created.ID)
 	if err != nil {
 		t.Fatalf("GetEnvVarKeys failed: %v", err)
 	}
@@ -179,7 +225,6 @@ func TestSetEnvVars(t *testing.T) {
 		t.Errorf("expected 2 env vars, got %d", len(vars))
 	}
 
-	// Values should be masked (empty string in response)
 	for _, v := range vars {
 		if v.Value != "" {
 			t.Errorf("expected empty value (masked), got %s", v.Value)
