@@ -9,6 +9,10 @@ import (
 	"errors"
 )
 
+// ErrUnsupportedRunner is returned when a requested runner backend is not
+// implemented in the current build.
+var ErrUnsupportedRunner = errors.New("process: runner backend not implemented")
+
 // Common errors returned by process runners.
 var (
 	ErrNotFound    = errors.New("process: service not found")

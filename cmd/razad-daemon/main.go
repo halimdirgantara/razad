@@ -6,6 +6,7 @@ import (
 	"io/fs"
 	"log"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -69,8 +70,8 @@ func main() {
 	// --- Crypto ---
 	enc, err := crypto.New(cfg.Auth.SecretKey)
 	if err != nil {
-		slog.Warn("crypto: using derived key from host identity", "error", err)
-		enc, _ = crypto.New("razad-default-dev-key-change-in-production!!")
+		slog.Error("failed to initialize crypto", "error", err)
+		os.Exit(1)
 	}
 
 	// --- Process Runner ---
@@ -170,7 +171,7 @@ func main() {
 	router.Handle("/", spaFallbackHandler(web.UI))
 
 	// --- Server ---
-	addr := fmt.Sprintf(":%d", cfg.Port)
+	addr := net.JoinHostPort(cfg.Host, fmt.Sprintf("%d", cfg.Port))
 	srv := &http.Server{
 		Addr:         addr,
 		Handler:      router,
