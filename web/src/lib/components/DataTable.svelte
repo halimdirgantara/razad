@@ -63,7 +63,7 @@
 						class:selected={selectedId && row.id === selectedId}
 						onclick={onselect ? () => onselect(row) : undefined}
 						role={onselect ? 'button' : undefined}
-						tabindex={onselect ? '0' : undefined}
+						tabindex={onselect ? 0 : undefined}
 						onkeydown={onselect ? (e: KeyboardEvent) => { if (e.key === 'Enter') onselect(row); } : undefined}
 					>
 						{#each columns as col}
