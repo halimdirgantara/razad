@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -22,7 +23,9 @@ import (
 	"github.com/razad/razad/internal/database"
 	"github.com/razad/razad/internal/org"
 	"github.com/razad/razad/internal/process"
+	"github.com/razad/razad/internal/proxy"
 	"github.com/razad/razad/internal/server"
+	"github.com/razad/razad/internal/ssl"
 	websocketpkg "github.com/razad/razad/internal/websocket"
 	"github.com/razad/razad/web"
 )
@@ -101,6 +104,14 @@ func main() {
 	appSvc.SetAuditor(auditSvc)
 	appHandler := app.NewHandler(appSvc)
 
+	// --- Proxy ---
+	proxySvc := proxy.NewService(filepath.Join(cfg.DataDir, "nginx"))
+	proxyHandler := proxy.NewHandler(proxySvc, auditSvc)
+
+	// --- SSL ---
+	sslSvc := ssl.NewService(filepath.Join(cfg.DataDir, "letsencrypt"))
+	sslHandler := ssl.NewHandler(sslSvc, auditSvc)
+
 	// --- Seed admin ---
 	seedAdminIfNeeded(authSvc)
 
@@ -172,6 +183,12 @@ func main() {
 			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		}
 	}))
+
+	protected.HandleFunc("/api/v1/proxy/render", proxyHandler.Render)
+	protected.HandleFunc("/api/v1/proxy/apply", proxyHandler.Apply)
+	protected.HandleFunc("/api/v1/proxy/rollback", proxyHandler.Rollback)
+	protected.HandleFunc("/api/v1/ssl/issue", sslHandler.Issue)
+	protected.HandleFunc("/api/v1/ssl/renew", sslHandler.Renew)
 
 	// --- UI ---
 	router.Handle("/", spaFallbackHandler(web.UI))
