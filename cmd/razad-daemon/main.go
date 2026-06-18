@@ -26,6 +26,7 @@ import (
 	"github.com/razad/razad/internal/proxy"
 	"github.com/razad/razad/internal/server"
 	"github.com/razad/razad/internal/ssl"
+	"github.com/razad/razad/internal/observability"
 	websocketpkg "github.com/razad/razad/internal/websocket"
 	"github.com/razad/razad/web"
 )
@@ -97,11 +98,13 @@ func main() {
 
 	// --- WebSocket Hub ---
 	wsHub := websocketpkg.NewHub()
+	logStreamer := observability.NewLogStreamer(wsHub, cfg.DataDir)
 
 	// --- App ---
 	appRepo := app.NewRepository(db)
 	appSvc := app.NewService(appRepo, procRunner, enc, cfg.DataDir)
 	appSvc.SetAuditor(auditSvc)
+	appSvc.SetLogStreamer(logStreamer)
 	appHandler := app.NewHandler(appSvc)
 
 	// --- Proxy ---
@@ -159,6 +162,8 @@ func main() {
 		path := r.URL.Path
 
 		switch {
+		case hasSuffix(path, "/deployments") && r.Method == http.MethodGet:
+			appHandler.Deployments(w, r)
 		case hasSuffix(path, "/deploy") && r.Method == http.MethodPost:
 			appHandler.Deploy(w, r)
 		case hasSuffix(path, "/stop") && r.Method == http.MethodPost:

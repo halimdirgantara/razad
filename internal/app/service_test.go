@@ -183,6 +183,19 @@ func TestDeployAndStop(t *testing.T) {
 	}
 }
 
+type logStreamerRecorder struct {
+	watched   []string
+	unwatched []string
+}
+
+func (r *logStreamerRecorder) WatchApp(appID string) {
+	r.watched = append(r.watched, appID)
+}
+
+func (r *logStreamerRecorder) UnwatchApp(appID string) {
+	r.unwatched = append(r.unwatched, appID)
+}
+
 func TestDeleteApp(t *testing.T) {
 	svc := setupTestService(t)
 	ctx := context.Background()
@@ -198,6 +211,32 @@ func TestDeleteApp(t *testing.T) {
 	_, err := svc.Get(testUserID, created.ID)
 	if err == nil {
 		t.Error("expected error after delete")
+	}
+}
+
+func TestDeployStartsLogStreamingAndDeleteStopsIt(t *testing.T) {
+	svc := setupTestService(t)
+	recorder := &logStreamerRecorder{}
+	svc.SetLogStreamer(recorder)
+	ctx := context.Background()
+
+	created, _ := svc.Create(testUserID, CreateAppRequest{
+		Name: "stream-me", ProjectID: testProjectID, Runtime: "node",
+		StartCmd: "echo hello",
+	})
+
+	if _, err := svc.Deploy(ctx, testUserID, created.ID); err != nil {
+		t.Fatalf("Deploy failed: %v", err)
+	}
+	if len(recorder.watched) != 1 || recorder.watched[0] != created.ID {
+		t.Fatalf("expected WatchApp to be called with %s, got %#v", created.ID, recorder.watched)
+	}
+
+	if err := svc.Delete(ctx, testUserID, created.ID); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+	if len(recorder.unwatched) != 1 || recorder.unwatched[0] != created.ID {
+		t.Fatalf("expected UnwatchApp to be called with %s, got %#v", created.ID, recorder.unwatched)
 	}
 }
 
@@ -229,5 +268,34 @@ func TestSetEnvVars(t *testing.T) {
 		if v.Value != "" {
 			t.Errorf("expected empty value (masked), got %s", v.Value)
 		}
+	}
+}
+
+func TestListDeployments(t *testing.T) {
+	svc := setupTestService(t)
+
+	created, _ := svc.Create(testUserID, CreateAppRequest{
+		Name: "deployments-test", ProjectID: testProjectID, Runtime: "node",
+		StartCmd: "echo hello",
+	})
+
+	ctx := context.Background()
+	if _, err := svc.Deploy(ctx, testUserID, created.ID); err != nil {
+		t.Fatalf("Deploy failed: %v", err)
+	}
+
+	deployments, err := svc.ListDeployments(testUserID, created.ID)
+	if err != nil {
+		t.Fatalf("ListDeployments failed: %v", err)
+	}
+
+	if len(deployments) == 0 {
+		t.Fatal("expected at least one deployment")
+	}
+	if deployments[0].AppID != created.ID {
+		t.Errorf("expected deployment app id %s, got %s", created.ID, deployments[0].AppID)
+	}
+	if deployments[0].Status != "success" {
+		t.Errorf("expected deployment status success, got %s", deployments[0].Status)
 	}
 }

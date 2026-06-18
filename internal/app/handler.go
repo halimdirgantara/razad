@@ -206,6 +206,38 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	api.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }
 
+// Deployments handles GET /api/v1/apps/{id}/deployments.
+func (h *Handler) Deployments(w http.ResponseWriter, r *http.Request) {
+	userID := auth.GetUserID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+
+	id := extractID(r.URL.Path, "/api/v1/apps/")
+	if id == "" {
+		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing app id")
+		return
+	}
+
+	if r.Method != http.MethodGet {
+		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use GET")
+		return
+	}
+
+	deployments, err := h.svc.ListDeployments(userID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusForbidden, "deployments_failed", err.Error())
+		return
+	}
+
+	if deployments == nil {
+		deployments = []domain.AppDeployment{}
+	}
+
+	api.WriteJSON(w, http.StatusOK, deployments)
+}
+
 // Env handles GET/PUT /api/v1/apps/{id}/env.
 func (h *Handler) Env(w http.ResponseWriter, r *http.Request) {
 	userID := auth.GetUserID(r)

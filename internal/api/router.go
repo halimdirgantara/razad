@@ -3,8 +3,10 @@
 package api
 
 import (
+	"bufio"
 	"encoding/json"
 	"log/slog"
+	"net"
 	"net/http"
 	"time"
 )
@@ -108,6 +110,11 @@ func RecoveryMiddleware(next http.Handler) http.Handler {
 // RequestLogMiddleware logs each HTTP request with duration.
 func RequestLogMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/ws" || r.Header.Get("Upgrade") == "websocket" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
 		start := time.Now()
 
 		// Wrap response writer to capture status code
@@ -132,6 +139,35 @@ type loggingResponseWriter struct {
 func (lrw *loggingResponseWriter) WriteHeader(code int) {
 	lrw.statusCode = code
 	lrw.ResponseWriter.WriteHeader(code)
+}
+
+func (lrw *loggingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	hj, ok := lrw.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, http.ErrNotSupported
+	}
+	return hj.Hijack()
+}
+
+func (lrw *loggingResponseWriter) Flush() {
+	if f, ok := lrw.ResponseWriter.(http.Flusher); ok {
+		f.Flush()
+	}
+}
+
+func (lrw *loggingResponseWriter) CloseNotify() <-chan bool {
+	if cn, ok := lrw.ResponseWriter.(http.CloseNotifier); ok {
+		return cn.CloseNotify()
+	}
+	ch := make(chan bool, 1)
+	return ch
+}
+
+func (lrw *loggingResponseWriter) Push(target string, opts *http.PushOptions) error {
+	if p, ok := lrw.ResponseWriter.(http.Pusher); ok {
+		return p.Push(target, opts)
+	}
+	return http.ErrNotSupported
 }
 
 // ---------------------------------------------------------------------------

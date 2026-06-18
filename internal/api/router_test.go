@@ -80,6 +80,38 @@ func TestRecoveryMiddleware(t *testing.T) {
 	}
 }
 
+func TestWebSocketRoutePreservesHijacker(t *testing.T) {
+	router := NewRouter()
+	router.HandleFunc("/ws", func(w http.ResponseWriter, r *http.Request) {
+		if _, ok := w.(http.Hijacker); !ok {
+			t.Fatalf("expected websocket route writer to implement http.Hijacker")
+		}
+		w.WriteHeader(http.StatusNoContent)
+	})
+
+	ts := httptest.NewServer(router)
+	defer ts.Close()
+
+	req, err := http.NewRequest(http.MethodGet, ts.URL+"/ws", nil)
+	if err != nil {
+		t.Fatalf("request build failed: %v", err)
+	}
+	req.Header.Set("Connection", "Upgrade")
+	req.Header.Set("Upgrade", "websocket")
+	req.Header.Set("Sec-WebSocket-Version", "13")
+	req.Header.Set("Sec-WebSocket-Key", "dGhlIHNhbXBsZSBub25jZQ==")
+
+	resp, err := http.DefaultClient.Do(req)
+	if err != nil {
+		t.Fatalf("request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusNoContent && resp.StatusCode != http.StatusSwitchingProtocols {
+		t.Fatalf("expected websocket-capable response, got %d", resp.StatusCode)
+	}
+}
+
 func TestRouteGroup(t *testing.T) {
 	router := NewRouter()
 
