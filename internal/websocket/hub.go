@@ -4,6 +4,7 @@ package websocket
 
 import (
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"sync"
@@ -17,6 +18,9 @@ var upgrader = gws.Upgrader{
 	WriteBufferSize: 1024,
 	// TODO: restrict to configured allowed origins in production
 	CheckOrigin: func(r *http.Request) bool { return true },
+	Error: func(w http.ResponseWriter, r *http.Request, status int, reason error) {
+		http.Error(w, reason.Error(), status)
+	},
 }
 
 // Message is a generic WebSocket message.
@@ -49,9 +53,16 @@ func NewHub() *Hub {
 
 // HandleConnection upgrades an HTTP connection to WebSocket.
 func (h *Hub) HandleConnection(w http.ResponseWriter, r *http.Request) {
+	hasHijacker := false
+	if _, ok := w.(http.Hijacker); ok {
+		hasHijacker = true
+	}
+	slog.Debug("websocket: handler entry", "path", r.URL.Path, "writer", fmt.Sprintf("%T", w), "hijacker", hasHijacker)
+
 	conn, err := upgrader.Upgrade(w, r, nil)
 	if err != nil {
 		slog.Warn("websocket: upgrade failed", "error", err)
+		http.Error(w, "websocket upgrade failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 

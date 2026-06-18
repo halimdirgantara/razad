@@ -20,13 +20,19 @@ var (
 	ErrAccessDenied = errors.New("app: access denied")
 )
 
+type LogStreamer interface {
+	WatchApp(appID string)
+	UnwatchApp(appID string)
+}
+
 // Service handles app management business logic.
 type Service struct {
-	repo    *Repository
-	proc    process.Runner
-	enc     *crypto.Encrypter
-	audit   *audit.Service
-	dataDir string
+	repo       *Repository
+	proc       process.Runner
+	enc        *crypto.Encrypter
+	audit      *audit.Service
+	dataDir    string
+	logStreams LogStreamer
 }
 
 // NewService creates an app service.
@@ -42,6 +48,11 @@ func NewService(repo *Repository, proc process.Runner, enc *crypto.Encrypter, da
 // SetAuditor attaches an audit recorder to the service.
 func (s *Service) SetAuditor(auditor *audit.Service) {
 	s.audit = auditor
+}
+
+// SetLogStreamer attaches a log streamer to the service.
+func (s *Service) SetLogStreamer(streamer LogStreamer) {
+	s.logStreams = streamer
 }
 
 func (s *Service) recordAudit(ctx context.Context, actorID, action, entityType, entityID string, metadata map[string]any) {
@@ -116,6 +127,10 @@ func (s *Service) Deploy(ctx context.Context, userID, appID string) (*domain.App
 	appDir := filepath.Join(s.dataDir, "apps", appID)
 	workDir := appDir
 
+	if s.logStreams != nil {
+		s.logStreams.WatchApp(appID)
+	}
+
 	if err := os.MkdirAll(workDir, 0755); err != nil {
 		s.repo.UpdateDeploymentStatus(deployment.ID, "failed", fmt.Sprintf("mkdir: %v", err))
 		s.repo.UpdateStatus(appID, "failed")
@@ -176,6 +191,9 @@ func (s *Service) Restart(ctx context.Context, userID, appID string) (*domain.Ap
 	}
 
 	appDir := filepath.Join(s.dataDir, "apps", appID)
+	if s.logStreams != nil {
+		s.logStreams.WatchApp(appID)
+	}
 	if err := s.proc.Start(ctx, appID, startCmd, nil, appDir); err != nil {
 		s.repo.UpdateStatus(appID, "failed")
 		return nil, fmt.Errorf("app: restart start: %w", err)
@@ -191,6 +209,9 @@ func (s *Service) Delete(ctx context.Context, userID, appID string) error {
 		return ErrNotFound
 	}
 	_ = s.proc.Stop(ctx, appID)
+	if s.logStreams != nil {
+		s.logStreams.UnwatchApp(appID)
+	}
 	s.recordAudit(ctx, userID, "app.delete", "app", appID, nil)
 	return s.repo.Delete(appID)
 }
@@ -219,6 +240,14 @@ func (s *Service) GetEnvVarKeys(userID, appID string) ([]domain.AppEnvVar, error
 		return nil, ErrNotFound
 	}
 	return s.repo.ListEnvVars(appID)
+}
+
+// ListDeployments returns deployments for an app.
+func (s *Service) ListDeployments(userID, appID string) ([]domain.AppDeployment, error) {
+	if _, err := s.repo.FindByIDForUser(userID, appID); err != nil {
+		return nil, ErrNotFound
+	}
+	return s.repo.ListDeployments(appID)
 }
 
 func envKeys(vars []EnvVarInput) []string {
