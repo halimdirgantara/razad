@@ -128,6 +128,23 @@ func Migrate(db *sql.DB) error {
 		metadata_json TEXT NOT NULL DEFAULT '{}',
 		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
 	);
+
+	CREATE TABLE IF NOT EXISTS database_instances (
+		id TEXT PRIMARY KEY,
+		owner_user_id TEXT NOT NULL REFERENCES users(id),
+		name TEXT NOT NULL,
+		engine TEXT NOT NULL,
+		version TEXT NOT NULL,
+		host TEXT NOT NULL,
+		port INTEGER NOT NULL,
+		username TEXT NOT NULL,
+		password TEXT NOT NULL,
+		database_name TEXT NOT NULL,
+		status TEXT NOT NULL DEFAULT 'provisioned',
+		connection_string TEXT NOT NULL,
+		created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+		updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+	);
 	`
 
 	if _, err := db.Exec(schema); err != nil {

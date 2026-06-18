@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
+
+	"github.com/razad/razad/internal/requestctx"
 )
 
 // contextKey is a private type for context keys to avoid collisions.
@@ -13,8 +15,11 @@ type contextKey string
 const (
 	// ContextUserKey holds the authenticated user info in the request context.
 	ContextUserKey contextKey = "user"
+)
+
+var (
 	// ContextUserIDKey holds the authenticated user ID in the request context.
-	ContextUserIDKey contextKey = "user_id"
+	ContextUserIDKey = requestctx.UserIDKey
 )
 
 // Middleware returns an HTTP middleware that validates session tokens.
@@ -35,7 +40,7 @@ func Middleware(svc *Service) func(http.Handler) http.Handler {
 			}
 
 			ctx := context.WithValue(r.Context(), ContextUserKey, user)
-			ctx = context.WithValue(ctx, ContextUserIDKey, user.ID)
+			ctx = requestctx.WithUserID(ctx, user.ID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
@@ -50,7 +55,7 @@ func OptionalMiddleware(svc *Service) func(http.Handler) http.Handler {
 			if token != "" {
 				if user, err := svc.ValidateSession(token); err == nil {
 					ctx := context.WithValue(r.Context(), ContextUserKey, user)
-					ctx = context.WithValue(ctx, ContextUserIDKey, user.ID)
+					ctx = requestctx.WithUserID(ctx, user.ID)
 					next.ServeHTTP(w, r.WithContext(ctx))
 					return
 				}

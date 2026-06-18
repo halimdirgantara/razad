@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/razad/razad/internal/api"
+	"github.com/razad/razad/internal/ai"
 	"github.com/razad/razad/internal/app"
 	"github.com/razad/razad/internal/audit"
 	"github.com/razad/razad/internal/auth"
@@ -107,6 +108,15 @@ func main() {
 	appSvc.SetLogStreamer(logStreamer)
 	appHandler := app.NewHandler(appSvc)
 
+	// --- Database ---
+	dbRepo := database.NewRepository(db)
+	dbSvc := database.NewService(dbRepo)
+	dbHandler := database.NewHandler(dbSvc)
+
+	// --- AI ---
+	aiSvc := ai.NewService(auditSvc)
+	aiHandler := ai.NewHandler(aiSvc)
+
 	// --- Proxy ---
 	proxySvc := proxy.NewService(filepath.Join(cfg.DataDir, "nginx"))
 	proxyHandler := proxy.NewHandler(proxySvc, auditSvc)
@@ -188,6 +198,31 @@ func main() {
 			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
 		}
 	}))
+
+	protected.Handle("/api/v1/databases", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			dbHandler.List(w, r)
+		case http.MethodPost:
+			dbHandler.Create(w, r)
+		default:
+			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+	}))
+
+	protected.Handle("/api/v1/databases/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			dbHandler.Get(w, r)
+		case http.MethodDelete:
+			dbHandler.Delete(w, r)
+		default:
+			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
+		}
+	}))
+
+	protected.HandleFunc("/api/v1/ai", aiHandler.Index)
+	protected.HandleFunc("/api/v1/ai/actions", aiHandler.Action)
 
 	protected.HandleFunc("/api/v1/proxy/render", proxyHandler.Render)
 	protected.HandleFunc("/api/v1/proxy/apply", proxyHandler.Apply)
