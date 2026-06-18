@@ -1,175 +1,286 @@
 <script lang="ts">
-	import Card from '$lib/components/Card.svelte';
-	import Button from '$lib/components/Button.svelte';
-	import { onMount } from 'svelte';
+		import Card from '$lib/components/Card.svelte';
+		import Button from '$lib/components/Button.svelte';
+		import { onMount } from 'svelte';
 
-	type ProxyMode = 'render' | 'apply' | 'rollback';
-	type SSLMode = 'issue' | 'renew';
-
-	let activeTab = $state<'proxy' | 'ssl'>('proxy');
-	let loading = $state(false);
-	let error = $state('');
-	let success = $state('');
-	let output = $state('');
-	let outputLabel = $state('');
-	let outputHint = $state('');
-
-	let proxyName = $state('web');
-	let proxyDomain = $state('app.example.com');
-	let proxyUpstreamHost = $state('127.0.0.1');
-	let proxyUpstreamPort = $state(3000);
-	let proxyTls = $state(true);
-	let proxyBodyLimitMb = $state(20);
-
-	let sslDomain = $state('app.example.com');
-	let sslEmail = $state('ops@example.com');
-	let sslWebroot = $state('/var/www/html');
-
-	const quickPresets = [
-		{
-			label: 'Node app',
-			name: 'node-web',
-			domain: 'web.example.com',
-			upstreamHost: '127.0.0.1',
-			upstreamPort: 3000,
-			tls: true,
-			bodyLimitMb: 20,
-		},
-		{
-			label: 'Service app',
-			name: 'service-api',
-			domain: 'api.example.com',
-			upstreamHost: '10.0.0.12',
-			upstreamPort: 8080,
-			tls: false,
-			bodyLimitMb: 50,
-		},
-	];
-
-	function authHeaders() {
-		return {
-			'Content-Type': 'application/json',
-			'Authorization': `Bearer ${localStorage.getItem('razad_token')}`,
+		type ProxyMode = 'render' | 'apply' | 'rollback';
+		type SSLMode = 'issue' | 'renew';
+		type AppSummary = {
+			id: string;
+			name: string;
+			status?: string;
+			runtime?: string;
+			project_id?: string;
+			start_cmd?: string;
 		};
-	}
-
-	function pretty(value: unknown): string {
-		return JSON.stringify(value, null, 2);
-	}
-
-	function setPreview(label: string, hint: string, value: string) {
-		outputLabel = label;
-		outputHint = hint;
-		output = value;
-	}
-
-	function proxyPayload() {
-		return {
-			name: proxyName,
-			domain: proxyDomain,
-			upstream_host: proxyUpstreamHost,
-			upstream_port: proxyUpstreamPort,
-			tls: proxyTls,
-			body_limit_mb: proxyBodyLimitMb,
+	type AppDetail = AppSummary & {
+			git_url?: string;
 		};
-	}
 
-	function sslIssuePayload() {
-		return {
-			domain: sslDomain,
-			email: sslEmail,
-			webroot: sslWebroot,
-		};
-	}
+		let activeTab = $state<'proxy' | 'ssl'>('proxy');
+		let loading = $state(false);
+		let error = $state('');
+		let success = $state('');
+		let output = $state('');
+		let outputLabel = $state('');
+		let outputHint = $state('');
 
-	async function submitProxy(mode: ProxyMode) {
-		loading = true;
-		error = '';
-		success = '';
-		output = '';
-		outputLabel = '';
-		outputHint = '';
-		try {
-			const endpoint = mode === 'render'
-				? '/api/v1/proxy/render'
-				: mode === 'apply'
-					? '/api/v1/proxy/apply'
-					: '/api/v1/proxy/rollback';
-			const res = await fetch(endpoint, {
-				method: 'POST',
-				headers: authHeaders(),
-				body: JSON.stringify(proxyPayload()),
-			});
-			const data = await res.json().catch(() => null);
-			if (!res.ok) {
-				error = data?.error?.message ?? 'Proxy action failed.';
-				return;
-			}
-			if (mode === 'render') {
-				setPreview('Rendered Nginx config', 'Copy this block into nginx sites-available or use Apply to write it to disk.', data?.config ?? pretty(data));
-				success = 'Config rendered successfully.';
-			} else if (mode === 'apply') {
-				setPreview('Apply result', 'The daemon wrote candidate, enabled, and backup paths.', pretty(data));
-				success = 'Proxy config applied.';
-			} else {
-				setPreview('Rollback result', 'The daemon restored the backup snapshot for this binding.', pretty(data));
-				success = 'Proxy config rolled back.';
-			}
-		} catch {
-			error = 'Failed to connect to daemon.';
-		} finally {
-			loading = false;
+		let apps = $state<AppSummary[]>([]);
+		let appsLoading = $state(true);
+		let appsError = $state('');
+		let appActionLoadingId = $state('');
+
+		let proxyName = $state('web');
+		let proxyDomain = $state('app.example.com');
+		let proxyUpstreamHost = $state('127.0.0.1');
+		let proxyUpstreamPort = $state(3000);
+		let proxyTls = $state(true);
+		let proxyBodyLimitMb = $state(20);
+
+		let sslDomain = $state('app.example.com');
+		let sslEmail = $state('ops@example.com');
+		let sslWebroot = $state('/var/www/html');
+
+		const quickPresets = [
+			{
+				label: 'Node app',
+				name: 'node-web',
+				domain: 'web.example.com',
+				upstreamHost: '127.0.0.1',
+				upstreamPort: 3000,
+				tls: true,
+				bodyLimitMb: 20,
+			},
+			{
+				label: 'Service app',
+				name: 'service-api',
+				domain: 'api.example.com',
+				upstreamHost: '10.0.0.12',
+				upstreamPort: 8080,
+				tls: false,
+				bodyLimitMb: 50,
+			},
+		];
+
+		function authHeaders(extra: Record<string, string> = {}) {
+			return {
+				'Content-Type': 'application/json',
+				Authorization: `Bearer ${localStorage.getItem('razad_token')}`,
+				...extra,
+			};
 		}
-	}
 
-	async function submitSSL(mode: SSLMode) {
-		loading = true;
-		error = '';
-		success = '';
-		output = '';
-		outputLabel = '';
-		outputHint = '';
-		try {
-			const endpoint = mode === 'issue' ? '/api/v1/ssl/issue' : '/api/v1/ssl/renew';
-			const body = mode === 'issue' ? sslIssuePayload() : { domain: sslDomain };
-			const res = await fetch(endpoint, {
-				method: 'POST',
-				headers: authHeaders(),
-				body: JSON.stringify(body),
-			});
-			const data = await res.json().catch(() => null);
-			if (!res.ok) {
-				error = data?.error?.message ?? 'SSL action failed.';
-				return;
-			}
-			if (mode === 'issue') {
-				setPreview('Certbot issuance command', 'Run this after DNS points at the server and the webroot is reachable.', pretty(data));
-				success = 'Certificate issuance command ready.';
-			} else {
-				setPreview('Certbot renewal command', 'Use this to confirm the renewal path for the chosen domain.', pretty(data));
-				success = 'Renewal command ready.';
-			}
-		} catch {
-			error = 'Failed to connect to daemon.';
-		} finally {
-			loading = false;
+		function pretty(value: unknown): string {
+			return JSON.stringify(value, null, 2);
 		}
-	}
 
-	function applyPreset(preset: typeof quickPresets[number]) {
-		proxyName = preset.name;
-		proxyDomain = preset.domain;
-		proxyUpstreamHost = preset.upstreamHost;
-		proxyUpstreamPort = preset.upstreamPort;
-		proxyTls = preset.tls;
-		proxyBodyLimitMb = preset.bodyLimitMb;
-		sslDomain = preset.domain;
-	}
+		function setPreview(label: string, hint: string, value: string) {
+			outputLabel = label;
+			outputHint = hint;
+			output = value;
+		}
 
-	onMount(() => {
-		if (!sslDomain) sslDomain = proxyDomain;
-	});
-</script>
+		function proxyPayload() {
+			return {
+				name: proxyName,
+				domain: proxyDomain,
+				upstream_host: proxyUpstreamHost,
+				upstream_port: proxyUpstreamPort,
+				tls: proxyTls,
+				body_limit_mb: proxyBodyLimitMb,
+			};
+		}
+
+		function sslIssuePayload() {
+			return {
+				domain: sslDomain,
+				email: sslEmail,
+				webroot: sslWebroot,
+			};
+		}
+
+		function suggestDomain(appName: string) {
+			return `${appName.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '')}.example.com`;
+		}
+
+		function extractPort(startCmd?: string) {
+			if (!startCmd) return null;
+			const portMatch = startCmd.match(/--port\s+(\d{2,5})/i) ?? startCmd.match(/:(\d{2,5})/);
+			if (!portMatch) return null;
+			const port = Number(portMatch[1]);
+			return Number.isInteger(port) && port > 0 && port <= 65535 ? port : null;
+		}
+
+		function seedProxyFromApp(app: AppDetail) {
+			proxyName = app.name;
+			proxyDomain = suggestDomain(app.name);
+			sslDomain = proxyDomain;
+			const port = extractPort(app.start_cmd);
+			if (port) proxyUpstreamPort = port;
+		}
+
+		async function loadAppDetail(appId: string) {
+			const res = await fetch(`/api/v1/apps/${appId}`, {
+				headers: authHeaders({ Accept: 'application/json' }),
+			});
+			if (!res.ok) return null;
+			return (await res.json()) as AppDetail;
+		}
+
+		async function prefillFromApp(app: AppSummary) {
+			appActionLoadingId = app.id;
+			try {
+				const detail = await loadAppDetail(app.id);
+				seedProxyFromApp(detail ?? app);
+				success = `Loaded ${app.name} from /api/v1/apps/${app.id}.`;
+				activeTab = 'proxy';
+			} catch {
+				error = 'Failed to load app details.';
+			} finally {
+				appActionLoadingId = '';
+			}
+		}
+
+		async function deployApp(app: AppSummary) {
+			appActionLoadingId = app.id;
+			error = '';
+			success = '';
+			try {
+				const res = await fetch(`/api/v1/apps/${app.id}/deploy`, {
+					method: 'POST',
+					headers: authHeaders({ Accept: 'application/json' }),
+				});
+				const data = await res.json().catch(() => null);
+				if (!res.ok) {
+					error = data?.error?.message ?? 'App deploy failed.';
+					return;
+				}
+				const nextApp = (data ?? app) as AppDetail;
+				apps = apps.map((current) => (current.id === nextApp.id ? { ...current, ...nextApp } : current));
+				success = `Deployment started for ${nextApp.name}.`;
+				seedProxyFromApp(nextApp);
+				activeTab = 'proxy';
+			} catch {
+				error = 'Failed to connect to daemon.';
+			} finally {
+				appActionLoadingId = '';
+			}
+		}
+
+async function loadApps() {
+			appsLoading = true;
+			appsError = '';
+			try {
+				const res = await fetch('/api/v1/apps', {
+					headers: authHeaders({ Accept: 'application/json' }),
+				});
+				if (!res.ok) {
+					if (res.status === 401) {
+						appsError = 'Please log in first to load your apps.';
+					} else {
+						appsError = 'Could not load apps from the daemon.';
+					}
+					apps = [];
+					return;
+				}
+				apps = await res.json();
+			} catch {
+				appsError = 'Failed to connect to daemon.';
+				apps = [];
+			} finally {
+				appsLoading = false;
+			}
+		}
+
+		async function submitProxy(mode: ProxyMode) {
+			loading = true;
+			error = '';
+			success = '';
+			output = '';
+			outputLabel = '';
+			outputHint = '';
+			try {
+				const endpoint = mode === 'render'
+					? '/api/v1/proxy/render'
+					: mode === 'apply'
+						? '/api/v1/proxy/apply'
+						: '/api/v1/proxy/rollback';
+				const res = await fetch(endpoint, {
+					method: 'POST',
+					headers: authHeaders(),
+					body: JSON.stringify(proxyPayload()),
+				});
+				const data = await res.json().catch(() => null);
+				if (!res.ok) {
+					error = data?.error?.message ?? 'Proxy action failed.';
+					return;
+				}
+				if (mode === 'render') {
+					setPreview('Rendered Nginx config', 'Copy this block into nginx sites-available or use Apply to write it to disk.', data?.config ?? pretty(data));
+					success = 'Config rendered successfully.';
+				} else if (mode === 'apply') {
+					setPreview('Apply result', 'The daemon wrote candidate, enabled, and backup paths.', pretty(data));
+					success = 'Proxy config applied.';
+				} else {
+					setPreview('Rollback result', 'The daemon restored the backup snapshot for this binding.', pretty(data));
+					success = 'Proxy config rolled back.';
+				}
+			} catch {
+				error = 'Failed to connect to daemon.';
+			} finally {
+				loading = false;
+			}
+		}
+
+		async function submitSSL(mode: SSLMode) {
+			loading = true;
+			error = '';
+			success = '';
+			output = '';
+			outputLabel = '';
+			outputHint = '';
+			try {
+				const endpoint = mode === 'issue' ? '/api/v1/ssl/issue' : '/api/v1/ssl/renew';
+				const body = mode === 'issue' ? sslIssuePayload() : { domain: sslDomain };
+				const res = await fetch(endpoint, {
+					method: 'POST',
+					headers: authHeaders(),
+					body: JSON.stringify(body),
+				});
+				const data = await res.json().catch(() => null);
+				if (!res.ok) {
+					error = data?.error?.message ?? 'SSL action failed.';
+					return;
+				}
+				if (mode === 'issue') {
+					setPreview('Certbot issuance command', 'Run this after DNS points at the server and the webroot is reachable.', pretty(data));
+					success = 'Certificate issuance command ready.';
+				} else {
+					setPreview('Certbot renewal command', 'Use this to confirm the renewal path for the chosen domain.', pretty(data));
+					success = 'Renewal command ready.';
+				}
+			} catch {
+				error = 'Failed to connect to daemon.';
+			} finally {
+				loading = false;
+			}
+		}
+
+		function applyPreset(preset: typeof quickPresets[number]) {
+			proxyName = preset.name;
+			proxyDomain = preset.domain;
+			proxyUpstreamHost = preset.upstreamHost;
+			proxyUpstreamPort = preset.upstreamPort;
+			proxyTls = preset.tls;
+			proxyBodyLimitMb = preset.bodyLimitMb;
+			sslDomain = preset.domain;
+		}
+
+		onMount(() => {
+			if (!sslDomain) sslDomain = proxyDomain;
+			loadApps();
+		});
+	</script>
 
 <svelte:head><title>Domains — Razad</title></svelte:head>
 
@@ -198,6 +309,38 @@
 					</button>
 				{/each}
 			</div>
+		</Card>
+
+		<Card title="Linked apps from /api/v1/apps" padding="tight">
+			{#if appsLoading}
+				<p class="text-muted">Loading apps from the daemon...</p>
+			{:else if appsError}
+				<div class="empty-state">
+					<p class="err">{appsError}</p>
+					<p class="text-muted">The page still works manually, but the app selector could not be loaded.</p>
+				</div>
+			{:else if apps.length === 0}
+				<div class="empty-state">
+					<p class="text-muted">No apps returned by the API yet. Create one in Applications first.</p>
+					<a href="/apps"><Button variant="secondary" size="sm">Open Applications</Button></a>
+				</div>
+			{:else}
+				<div class="app-list">
+					{#each apps as app}
+					<div class="app-row">
+						<div>
+							<strong>{app.name}</strong>
+							<p class="text-muted">{app.status ?? 'unknown'} · {app.runtime ?? 'auto'} · {app.id}</p>
+						</div>
+						<div class="app-actions">
+							<a href={`/apps/${app.id}`}><Button variant="ghost" size="sm">Open app</Button></a>
+							<Button variant="secondary" size="sm" disabled={appActionLoadingId === app.id} onclick={() => prefillFromApp(app)}>Use details</Button>
+							<Button variant="primary" size="sm" disabled={appActionLoadingId === app.id} onclick={() => deployApp(app)}>Deploy app</Button>
+						</div>
+					</div>
+				{/each}
+				</div>
+			{/if}
 		</Card>
 
 		{#if activeTab === 'proxy'}
@@ -357,6 +500,18 @@
 		border: 1px solid var(--border);
 		color: var(--text-muted);
 		flex-shrink: 0;
+	}
+	.app-row {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+		gap: var(--space-3);
+		flex-wrap: wrap;
+	}
+	.app-actions {
+		display: flex;
+		gap: var(--space-2);
+		flex-wrap: wrap;
 	}
 	.form-grid { display: grid; gap: var(--space-4); }
 	.field { display: flex; flex-direction: column; gap: var(--space-1); }
