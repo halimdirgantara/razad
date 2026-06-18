@@ -12,6 +12,7 @@
 	let success = $state('');
 	let output = $state('');
 	let outputLabel = $state('');
+	let outputHint = $state('');
 
 	let proxyName = $state('web');
 	let proxyDomain = $state('app.example.com');
@@ -56,6 +57,12 @@
 		return JSON.stringify(value, null, 2);
 	}
 
+	function setPreview(label: string, hint: string, value: string) {
+		outputLabel = label;
+		outputHint = hint;
+		output = value;
+	}
+
 	function proxyPayload() {
 		return {
 			name: proxyName,
@@ -81,6 +88,7 @@
 		success = '';
 		output = '';
 		outputLabel = '';
+		outputHint = '';
 		try {
 			const endpoint = mode === 'render'
 				? '/api/v1/proxy/render'
@@ -97,9 +105,16 @@
 				error = data?.error?.message ?? 'Proxy action failed.';
 				return;
 			}
-			outputLabel = mode === 'render' ? 'Rendered Nginx config' : mode === 'apply' ? 'Apply result' : 'Rollback result';
-			output = data?.config ? data.config : pretty(data);
-			success = mode === 'render' ? 'Config rendered successfully.' : mode === 'apply' ? 'Proxy config applied.' : 'Proxy config rolled back.';
+			if (mode === 'render') {
+				setPreview('Rendered Nginx config', 'Copy this block into nginx sites-available or use Apply to write it to disk.', data?.config ?? pretty(data));
+				success = 'Config rendered successfully.';
+			} else if (mode === 'apply') {
+				setPreview('Apply result', 'The daemon wrote candidate, enabled, and backup paths.', pretty(data));
+				success = 'Proxy config applied.';
+			} else {
+				setPreview('Rollback result', 'The daemon restored the backup snapshot for this binding.', pretty(data));
+				success = 'Proxy config rolled back.';
+			}
 		} catch {
 			error = 'Failed to connect to daemon.';
 		} finally {
@@ -113,6 +128,7 @@
 		success = '';
 		output = '';
 		outputLabel = '';
+		outputHint = '';
 		try {
 			const endpoint = mode === 'issue' ? '/api/v1/ssl/issue' : '/api/v1/ssl/renew';
 			const body = mode === 'issue' ? sslIssuePayload() : { domain: sslDomain };
@@ -126,9 +142,13 @@
 				error = data?.error?.message ?? 'SSL action failed.';
 				return;
 			}
-			outputLabel = mode === 'issue' ? 'certbot issuance command' : 'certbot renewal command';
-			output = data?.command ? data.command : pretty(data);
-			success = mode === 'issue' ? 'Certificate issuance command ready.' : 'Renewal command ready.';
+			if (mode === 'issue') {
+				setPreview('Certbot issuance command', 'Run this after DNS points at the server and the webroot is reachable.', pretty(data));
+				success = 'Certificate issuance command ready.';
+			} else {
+				setPreview('Certbot renewal command', 'Use this to confirm the renewal path for the chosen domain.', pretty(data));
+				success = 'Renewal command ready.';
+			}
 		} catch {
 			error = 'Failed to connect to daemon.';
 		} finally {
@@ -257,7 +277,7 @@
 			{#if output}
 				<div class="output-header">
 					<span class="output-label">{outputLabel}</span>
-					<span class="text-muted">Copy this into the daemon or use the UI action above.</span>
+					<span class="text-muted">{outputHint}</span>
 				</div>
 				<pre class="output">{output}</pre>
 			{:else}
