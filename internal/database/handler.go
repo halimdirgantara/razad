@@ -30,26 +30,25 @@ func NewHandler(svc *Service) *Handler {
 	return &Handler{svc: svc}
 }
 
+func (h *Handler) userID(r *http.Request) string {
+	return requestctx.UserID(r.Context())
+}
+
 // List handles GET /api/v1/databases.
 func (h *Handler) List(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use GET")
 		return
 	}
-
-	userID := requestctx.UserID(r.Context())
+	userID := h.userID(r)
 	if userID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
 		return
 	}
-
 	instances, err := h.svc.List(userID)
 	if err != nil {
 		api.WriteError(w, http.StatusInternalServerError, "list_failed", "could not list databases")
 		return
-	}
-	if instances == nil {
-		instances = []Instance{}
 	}
 	api.WriteJSON(w, http.StatusOK, instances)
 }
@@ -60,19 +59,16 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
 		return
 	}
-
-	userID := requestctx.UserID(r.Context())
+	userID := h.userID(r)
 	if userID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
 		return
 	}
-
 	var req CreateRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
 		return
 	}
-
 	inst, err := h.svc.Create(userID, req)
 	if err != nil {
 		code := "create_failed"
@@ -87,7 +83,6 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, status, code, err.Error())
 		return
 	}
-
 	api.WriteJSON(w, http.StatusCreated, inst)
 }
 
@@ -97,25 +92,121 @@ func (h *Handler) Get(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use GET")
 		return
 	}
-
-	userID := requestctx.UserID(r.Context())
+	userID := h.userID(r)
 	if userID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
 		return
 	}
-
 	id := extractID(r.URL.Path, "/api/v1/databases/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing database id")
 		return
 	}
-
 	inst, err := h.svc.Get(userID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusNotFound, "not_found", "database not found")
 		return
 	}
+	api.WriteJSON(w, http.StatusOK, inst)
+}
 
+// Deploy handles POST /api/v1/databases/{id}/deploy.
+func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
+		return
+	}
+	userID := h.userID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+	id := extractID(r.URL.Path, "/api/v1/databases/")
+	id = strings.TrimSuffix(id, "/deploy")
+	if id == "" {
+		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing database id")
+		return
+	}
+	inst, err := h.svc.Deploy(userID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "deploy_failed", err.Error())
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, inst)
+}
+
+// Stop handles POST /api/v1/databases/{id}/stop.
+func (h *Handler) Stop(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
+		return
+	}
+	userID := h.userID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+	id := extractID(r.URL.Path, "/api/v1/databases/")
+	id = strings.TrimSuffix(id, "/stop")
+	if id == "" {
+		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing database id")
+		return
+	}
+	inst, err := h.svc.Stop(userID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "stop_failed", err.Error())
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, inst)
+}
+
+// Restart handles POST /api/v1/databases/{id}/restart.
+func (h *Handler) Restart(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use POST")
+		return
+	}
+	userID := h.userID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+	id := extractID(r.URL.Path, "/api/v1/databases/")
+	id = strings.TrimSuffix(id, "/restart")
+	if id == "" {
+		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing database id")
+		return
+	}
+	inst, err := h.svc.Restart(userID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "restart_failed", err.Error())
+		return
+	}
+	api.WriteJSON(w, http.StatusOK, inst)
+}
+
+// Status handles GET /api/v1/databases/{id}/status.
+func (h *Handler) Status(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use GET")
+		return
+	}
+	userID := h.userID(r)
+	if userID == "" {
+		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
+		return
+	}
+	id := extractID(r.URL.Path, "/api/v1/databases/")
+	id = strings.TrimSuffix(id, "/status")
+	if id == "" {
+		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing database id")
+		return
+	}
+	inst, err := h.svc.Status(userID, id)
+	if err != nil {
+		api.WriteError(w, http.StatusBadRequest, "status_failed", err.Error())
+		return
+	}
 	api.WriteJSON(w, http.StatusOK, inst)
 }
 
@@ -125,23 +216,19 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 		api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "use DELETE")
 		return
 	}
-
-	userID := requestctx.UserID(r.Context())
+	userID := h.userID(r)
 	if userID == "" {
 		api.WriteError(w, http.StatusUnauthorized, "unauthorized", "not authenticated")
 		return
 	}
-
 	id := extractID(r.URL.Path, "/api/v1/databases/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing database id")
 		return
 	}
-
 	if err := h.svc.Delete(userID, id); err != nil {
 		api.WriteError(w, http.StatusNotFound, "not_found", "database not found")
 		return
 	}
-
 	api.WriteJSON(w, http.StatusOK, map[string]string{"status": "deleted"})
 }

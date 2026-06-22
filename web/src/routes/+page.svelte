@@ -25,7 +25,10 @@
 
 	async function fetchStats() {
 		try {
-			const res = await fetch('/api/v1/health/stats');
+			const token = localStorage.getItem('razad_token');
+			const res = await fetch('/api/v1/health/stats', {
+				headers: token ? { Authorization: `Bearer ${token}` } : {}
+			});
 			if (res.ok) {
 				stats = await res.json();
 				error = '';

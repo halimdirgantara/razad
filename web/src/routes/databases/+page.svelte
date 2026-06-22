@@ -26,6 +26,7 @@
 	let error = $state('');
 	let success = $state('');
 	let creating = $state(false);
+	let actionBusyId = $state('');
 
 	let name = $state('');
 	let engine = $state('postgresql');
@@ -71,6 +72,29 @@
 			error = 'Cannot reach daemon';
 		} finally {
 			creating = false;
+		}
+	}
+
+	async function mutateDatabase(id: string, action: 'deploy' | 'stop' | 'restart' | 'status') {
+		actionBusyId = id;
+		error = '';
+		success = '';
+		try {
+			const path = `/databases/${id}/${action}`;
+			const res = action === 'status'
+				? await api.get<DatabaseInstance>(path)
+				: await api.post<DatabaseInstance>(path, {});
+			if (!res.data) {
+				error = res.error?.message ?? `Failed to ${action} database`;
+				return;
+			}
+			const updated = res.data;
+			databases = databases.map((db) => (db.id === updated.id ? updated : db));
+			success = `${updated.name} ${action} successful.`;
+		} catch {
+			error = 'Cannot reach daemon';
+		} finally {
+			actionBusyId = '';
 		}
 	}
 
@@ -144,6 +168,22 @@
 							<div><span class="label">Password</span><code>{db.password}</code></div>
 							<div><span class="label">Connection</span><code>{db.connection_string}</code></div>
 						</div>
+						<div class="db-actions">
+							<Button variant="secondary" onclick={() => mutateDatabase(db.id, 'status')} disabled={actionBusyId === db.id}>
+								Refresh status
+							</Button>
+							{#if db.engine !== 'sqlite'}
+								<Button variant="secondary" onclick={() => mutateDatabase(db.id, 'restart')} disabled={actionBusyId === db.id}>
+									Restart
+								</Button>
+								<Button variant="secondary" onclick={() => mutateDatabase(db.id, 'stop')} disabled={actionBusyId === db.id}>
+									Stop
+								</Button>
+								<Button variant="primary" onclick={() => mutateDatabase(db.id, 'deploy')} disabled={actionBusyId === db.id}>
+									Deploy
+								</Button>
+							{/if}
+						</div>
 					</article>
 				{/each}
 			</div>
@@ -204,6 +244,7 @@
 		font-size: var(--font-size-xs);
 		font-family: var(--font-mono);
 	}
+	.db-actions { display: flex; flex-wrap: wrap; gap: var(--space-2); margin-top: var(--space-3); }
 	.info-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
 	.info-grid > div { display: flex; flex-direction: column; gap: 0.25rem; }
 	.label { font-size: var(--font-size-xs); text-transform: uppercase; letter-spacing: 0.04em; }

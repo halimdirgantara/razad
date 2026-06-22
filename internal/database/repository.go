@@ -16,15 +16,18 @@ func NewRepository(db *sql.DB) *Repository {
 }
 
 func (r *Repository) createForUser(ownerUserID string, inst *Instance) (*Instance, error) {
+	if inst.ID == "" {
+		return nil, fmt.Errorf("database: create instance: missing id")
+	}
 	created := &Instance{}
 	err := r.db.QueryRow(
 		`INSERT INTO database_instances (
 			id, owner_user_id, name, engine, version, host, port, username, password, database_name, status, connection_string, created_at, updated_at
 		) VALUES (
-			lower(hex(randomblob(16))), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')
+			?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now'), datetime('now')
 		)
 		RETURNING id, owner_user_id, name, engine, version, host, port, username, password, database_name, status, connection_string, created_at, updated_at`,
-		ownerUserID, inst.Name, inst.Engine, inst.Version, inst.Host, inst.Port, inst.Username, inst.Password, inst.DatabaseName, inst.Status, inst.ConnectionString,
+		inst.ID, ownerUserID, inst.Name, inst.Engine, inst.Version, inst.Host, inst.Port, inst.Username, inst.Password, inst.DatabaseName, inst.Status, inst.ConnectionString,
 	).Scan(
 		&created.ID, &created.OwnerUserID, &created.Name, &created.Engine, &created.Version, &created.Host, &created.Port,
 		&created.Username, &created.Password, &created.DatabaseName, &created.Status, &created.ConnectionString,
@@ -80,6 +83,18 @@ func (r *Repository) findByIDForUser(ownerUserID, id string) (*Instance, error) 
 		return nil, fmt.Errorf("database: find instance: %w", err)
 	}
 	return inst, nil
+}
+
+func (r *Repository) updateStatus(id, ownerUserID, status string) error {
+	res, err := r.db.Exec(`UPDATE database_instances SET status = ?, updated_at = datetime('now') WHERE id = ? AND owner_user_id = ?`, status, id, ownerUserID)
+	if err != nil {
+		return fmt.Errorf("database: update status: %w", err)
+	}
+	rows, _ := res.RowsAffected()
+	if rows == 0 {
+		return fmt.Errorf("database: update status: not found")
+	}
+	return nil
 }
 
 func (r *Repository) deleteForUser(ownerUserID, id string) error {

@@ -6,14 +6,49 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/razad/razad/internal/auth"
+	"github.com/razad/razad/internal/process"
 )
 
 const testUserID = "user-db-1"
+
+type fakeRunner struct {
+	startCalls   []startCall
+	stopCalls    []string
+	restartCalls []string
+	status       process.ProcessState
+}
+
+type startCall struct {
+	name    string
+	command string
+	env     []string
+	workDir string
+}
+
+func (f *fakeRunner) Start(ctx context.Context, name, command string, env []string, workDir string) error {
+	f.startCalls = append(f.startCalls, startCall{name: name, command: command, env: env, workDir: workDir})
+	return nil
+}
+
+func (f *fakeRunner) Stop(ctx context.Context, name string) error {
+	f.stopCalls = append(f.stopCalls, name)
+	return nil
+}
+
+func (f *fakeRunner) Restart(ctx context.Context, name string) error {
+	f.restartCalls = append(f.restartCalls, name)
+	return nil
+}
+
+func (f *fakeRunner) Status(ctx context.Context, name string) (process.ProcessState, error) {
+	return f.status, nil
+}
 
 func setupManagementTestDB(t *testing.T) *sql.DB {
 	t.Helper()
@@ -36,9 +71,10 @@ func setupManagementTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func TestServiceCreateDatabaseInstanceGeneratesConnectionInfo(t *testing.T) {
+func TestServiceCreateProvisionsDatabaseService(t *testing.T) {
 	db := setupManagementTestDB(t)
-	svc := NewService(NewRepository(db))
+	runner := &fakeRunner{}
+	svc := NewService(NewRepository(db), runner, t.TempDir())
 
 	inst, err := svc.Create(testUserID, CreateRequest{
 		Name:   "Primary Postgres",
@@ -48,26 +84,80 @@ func TestServiceCreateDatabaseInstanceGeneratesConnectionInfo(t *testing.T) {
 		t.Fatalf("Create failed: %v", err)
 	}
 
-	if inst.OwnerUserID != testUserID {
-		t.Fatalf("expected owner %s, got %s", testUserID, inst.OwnerUserID)
+	if inst.Status != "running" {
+		t.Fatalf("expected status running after provisioning, got %s", inst.Status)
 	}
-	if inst.Engine != "postgresql" {
-		t.Fatalf("expected engine postgresql, got %s", inst.Engine)
+	if len(runner.startCalls) != 1 {
+		t.Fatalf("expected 1 start call, got %d", len(runner.startCalls))
 	}
-	if inst.Status != "provisioned" {
-		t.Fatalf("expected status provisioned, got %s", inst.Status)
+	call := runner.startCalls[0]
+	if call.name != inst.ID {
+		t.Fatalf("expected start name %s, got %s", inst.ID, call.name)
 	}
-	if inst.Username == "" || inst.Password == "" {
-		t.Fatal("expected generated credentials")
+	if !strings.Contains(call.command, "postgres") {
+		t.Fatalf("expected postgres command, got %s", call.command)
+	}
+	if !strings.Contains(call.command, "-D") {
+		t.Fatalf("expected datadir flag in command, got %s", call.command)
+	}
+	if !strings.Contains(call.workDir, filepath.Join("databases", inst.ID)) {
+		t.Fatalf("expected workdir under databases dir, got %s", call.workDir)
 	}
 	if !strings.Contains(inst.ConnectionString, inst.Host) || !strings.Contains(inst.ConnectionString, inst.DatabaseName) {
 		t.Fatalf("expected connection string to include host and database name, got %s", inst.ConnectionString)
 	}
 }
 
+func TestServiceDeleteStopsProvisionedDatabaseService(t *testing.T) {
+	db := setupManagementTestDB(t)
+	runner := &fakeRunner{}
+	svc := NewService(NewRepository(db), runner, t.TempDir())
+
+	inst, err := svc.Create(testUserID, CreateRequest{Name: "Redis Cache", Engine: "redis"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if err := svc.Delete(testUserID, inst.ID); err != nil {
+		t.Fatalf("Delete failed: %v", err)
+	}
+	if len(runner.stopCalls) != 1 || runner.stopCalls[0] != inst.ID {
+		t.Fatalf("expected stop call for %s, got %#v", inst.ID, runner.stopCalls)
+	}
+	if _, err := svc.Get(testUserID, inst.ID); err == nil {
+		t.Fatal("expected deleted instance to be gone")
+	}
+}
+
+func TestServiceStatusAndRestartUseRunnerState(t *testing.T) {
+	db := setupManagementTestDB(t)
+	runner := &fakeRunner{status: process.StateRunning}
+	svc := NewService(NewRepository(db), runner, t.TempDir())
+
+	inst, err := svc.Create(testUserID, CreateRequest{Name: "Mongo Main", Engine: "mongodb"})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	runner.status = process.StateStopped
+	refreshed, err := svc.Status(testUserID, inst.ID)
+	if err != nil {
+		t.Fatalf("Status failed: %v", err)
+	}
+	if refreshed.Status != string(process.StateStopped) {
+		t.Fatalf("expected stopped status, got %s", refreshed.Status)
+	}
+
+	if _, err := svc.Restart(testUserID, inst.ID); err != nil {
+		t.Fatalf("Restart failed: %v", err)
+	}
+	if len(runner.startCalls) < 2 {
+		t.Fatalf("expected restart to start service again, got %#v", runner.startCalls)
+	}
+}
+
 func TestServiceListReturnsCreatedDatabaseInstances(t *testing.T) {
 	db := setupManagementTestDB(t)
-	svc := NewService(NewRepository(db))
+	svc := NewService(NewRepository(db), &fakeRunner{}, t.TempDir())
 
 	created, err := svc.Create(testUserID, CreateRequest{Name: "Redis Cache", Engine: "redis"})
 	if err != nil {
@@ -88,7 +178,7 @@ func TestServiceListReturnsCreatedDatabaseInstances(t *testing.T) {
 
 func TestHandlerCreateAndListDatabaseInstances(t *testing.T) {
 	db := setupManagementTestDB(t)
-	svc := NewService(NewRepository(db))
+	svc := NewService(NewRepository(db), &fakeRunner{}, t.TempDir())
 	h := NewHandler(svc)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/databases", strings.NewReader(`{"name":"MySQL Primary","engine":"mysql"}`))

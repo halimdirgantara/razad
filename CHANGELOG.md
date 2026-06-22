@@ -10,9 +10,10 @@ All notable changes to Razad will be documented in this file.
 - WebSocket routing safeguards so log upgrades remain compatible with request logging middleware.
 - Regression coverage for WebSocket-capable routing and app lifecycle integration.
 - AI orchestration scaffold with a protected `/api/v1/ai` endpoint, safe action registry, and audit logging.
-- Database management API and UI for listing and provisioning database instances, including persisted connection details.
+- Database management API and UI for listing, provisioning, and lifecycle control of database instances, with real daemon-backed provisioning via the process runner/service manager.
 
 ### Changed
+- Dashboard system health now sends the stored bearer token when calling `/api/v1/health/stats`, fixing post-login 401s in local dev and browser sessions.
 - App detail page now connects to the backend WebSocket origin during local development so live logs work from Vite dev servers.
 - Backend startup wires the observability log streamer into the app service.
 - Backend startup now also wires the AI and database handlers into the main router.

@@ -110,7 +110,7 @@ func main() {
 
 	// --- Database ---
 	dbRepo := database.NewRepository(db)
-	dbSvc := database.NewService(dbRepo)
+	dbSvc := database.NewService(dbRepo, procRunner, cfg.DataDir)
 	dbHandler := database.NewHandler(dbSvc)
 
 	// --- AI ---
@@ -211,10 +211,19 @@ func main() {
 	}))
 
 	protected.Handle("/api/v1/databases/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch r.Method {
-		case http.MethodGet:
+		path := r.URL.Path
+		switch {
+		case hasSuffix(path, "/deploy") && r.Method == http.MethodPost:
+			dbHandler.Deploy(w, r)
+		case hasSuffix(path, "/stop") && r.Method == http.MethodPost:
+			dbHandler.Stop(w, r)
+		case hasSuffix(path, "/restart") && r.Method == http.MethodPost:
+			dbHandler.Restart(w, r)
+		case hasSuffix(path, "/status") && r.Method == http.MethodGet:
+			dbHandler.Status(w, r)
+		case r.Method == http.MethodGet:
 			dbHandler.Get(w, r)
-		case http.MethodDelete:
+		case r.Method == http.MethodDelete:
 			dbHandler.Delete(w, r)
 		default:
 			api.WriteError(w, http.StatusMethodNotAllowed, "method_not_allowed", "method not allowed")
