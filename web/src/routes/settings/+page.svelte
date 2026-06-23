@@ -42,4 +42,10 @@
 	.empty-state {
 		padding: var(--space-4) 0;
 	}
+
+	@media (max-width: 720px) {
+		.settings-grid {
+			grid-template-columns: 1fr;
+		}
+	}
 </style>

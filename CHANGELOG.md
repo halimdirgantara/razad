@@ -14,6 +14,7 @@ All notable changes to Razad will be documented in this file.
 
 ### Changed
 - Dashboard system health now sends the stored bearer token when calling `/api/v1/health/stats`, fixing post-login 401s in local dev and browser sessions.
+- App creation now auto-resolves or bootstraps a personal default workspace for users who do not yet belong to any organization/project, avoiding `sql: no rows in result set` / `403` failures on first app creation.
 - App detail page now connects to the backend WebSocket origin during local development so live logs work from Vite dev servers.
 - Backend startup wires the observability log streamer into the app service.
 - Backend startup now also wires the AI and database handlers into the main router.

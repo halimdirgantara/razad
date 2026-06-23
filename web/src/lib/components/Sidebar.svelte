@@ -1,6 +1,13 @@
 <script lang="ts">
 	import { page } from '$app/stores';
 
+	interface Props {
+		mobileOpen?: boolean;
+		onNavigate?: () => void;
+	}
+
+	let { mobileOpen = false, onNavigate }: Props = $props();
+
 	const navItems = [
 		{ href: '/', label: 'Dashboard', icon: '◉' },
 		{ href: '/apps', label: 'Applications', icon: '⊞' },
@@ -25,11 +32,12 @@
 	];
 </script>
 
-<aside class="sidebar">
+<aside class="sidebar" class:mobile-open={mobileOpen}>
 	<div class="sidebar-brand">
 		<img class="brand-logo" src="/razad-logo.png" alt="Razad" />
 		<span class="brand-name">Razad</span>
 		<span class="brand-version">v0.1</span>
+		<button class="sidebar-close" type="button" aria-label="Close navigation" onclick={onNavigate}>✕</button>
 	</div>
 	<nav class="sidebar-nav">
 		{#each sections as section}
@@ -42,6 +50,7 @@
 								href={item.href}
 								class="nav-link"
 								class:active={$page.url.pathname === item.href}
+								onclick={onNavigate}
 							>
 								<span class="nav-icon">{item.icon}</span>
 								<span class="nav-label">{item.label}</span>
@@ -63,6 +72,7 @@
 		flex-direction: column;
 		flex-shrink: 0;
 		overflow-y: auto;
+		transition: transform 0.18s ease, box-shadow 0.18s ease;
 	}
 	.sidebar-brand {
 		display: flex;
@@ -86,6 +96,19 @@
 		font-size: var(--font-size-xs);
 		color: var(--text-muted);
 		margin-left: auto;
+	}
+	.sidebar-close {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		width: 2rem;
+		height: 2rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text);
+		cursor: pointer;
+		flex-shrink: 0;
 	}
 	.sidebar-nav {
 		flex: 1;
@@ -134,5 +157,25 @@
 	}
 	.nav-label {
 		white-space: nowrap;
+	}
+
+	@media (max-width: 900px) {
+		.sidebar {
+			position: fixed;
+			top: 0;
+			left: 0;
+			height: 100dvh;
+			z-index: 220;
+			box-shadow: var(--shadow-lg);
+			transform: translateX(-100%);
+		}
+
+		.sidebar.mobile-open {
+			transform: translateX(0);
+		}
+
+		.sidebar-close {
+			display: inline-flex;
+		}
 	}
 </style>

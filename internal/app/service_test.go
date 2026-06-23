@@ -35,7 +35,7 @@ func setupTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
-func seedTenantData(t *testing.T, db *sql.DB) {
+func seedUsersOnly(t *testing.T, db *sql.DB) {
 	t.Helper()
 	mustExec := func(q string, args ...any) {
 		if _, err := db.Exec(q, args...); err != nil {
@@ -44,6 +44,16 @@ func seedTenantData(t *testing.T, db *sql.DB) {
 	}
 	mustExec(`INSERT INTO users (id, name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`, testUserID, "Test User", "test@example.com", "hash")
 	mustExec(`INSERT INTO users (id, name, email, password_hash, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`, otherUserID, "Other User", "other@example.com", "hash")
+}
+
+func seedTenantData(t *testing.T, db *sql.DB) {
+	t.Helper()
+	seedUsersOnly(t, db)
+	mustExec := func(q string, args ...any) {
+		if _, err := db.Exec(q, args...); err != nil {
+			t.Fatalf("seed db: %v", err)
+		}
+	}
 	mustExec(`INSERT INTO organizations (id, name, slug, created_at, updated_at) VALUES (?, ?, ?, datetime('now'), datetime('now'))`, testOrgID, "Test Org", "test-org")
 	mustExec(`INSERT INTO organization_members (id, organization_id, user_id, role, created_at) VALUES (?, ?, ?, ?, datetime('now'))`, "member-1", testOrgID, testUserID, "admin")
 	mustExec(`INSERT INTO projects (id, organization_id, name, slug, created_at, updated_at) VALUES (?, ?, ?, ?, datetime('now'), datetime('now'))`, testProjectID, testOrgID, "Test Project", "test-project")
@@ -52,6 +62,25 @@ func seedTenantData(t *testing.T, db *sql.DB) {
 func setupTestService(t *testing.T) *Service {
 	t.Helper()
 	db := setupTestDB(t)
+	repo := NewRepository(db)
+	proc := process.New(process.Config{Runner: "local", DataDir: t.TempDir()})
+	enc, _ := crypto.New("test-key-1234567890123456")
+	return NewService(repo, proc, enc, t.TempDir())
+}
+
+func setupUserOnlyService(t *testing.T) *Service {
+	t.Helper()
+	f := "/tmp/razad-app-user-only-" + t.Name() + ".db"
+	os.Remove(f)
+	db, err := sql.Open("sqlite3", f)
+	if err != nil {
+		t.Fatalf("open test db: %v", err)
+	}
+	t.Cleanup(func() { db.Close(); os.Remove(f) })
+	if err := database.Migrate(db); err != nil {
+		t.Fatalf("migrate: %v", err)
+	}
+	seedUsersOnly(t, db)
 	repo := NewRepository(db)
 	proc := process.New(process.Config{Runner: "local", DataDir: t.TempDir()})
 	enc, _ := crypto.New("test-key-1234567890123456")
@@ -88,6 +117,33 @@ func TestCreateApp_DeniedForForeignTenant(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("expected error for foreign tenant")
+	}
+}
+
+func TestCreateApp_BootstrapsDefaultWorkspaceForUserWithoutProject(t *testing.T) {
+	svc := setupUserOnlyService(t)
+
+	app, err := svc.Create(testUserID, CreateAppRequest{
+		Name:      "bootstrap-app",
+		ProjectID: "default",
+		Runtime:   "node",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if app.ProjectID == "" {
+		t.Fatal("expected project id to be assigned")
+	}
+
+	apps, err := svc.ListAll(testUserID)
+	if err != nil {
+		t.Fatalf("ListAll failed: %v", err)
+	}
+	if len(apps) != 1 {
+		t.Fatalf("expected 1 app after bootstrap, got %d", len(apps))
+	}
+	if apps[0].ID != app.ID {
+		t.Fatalf("expected created app to be readable after bootstrap")
 	}
 }
 

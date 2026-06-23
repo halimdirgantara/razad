@@ -15,9 +15,10 @@ import (
 )
 
 var (
-	ErrNotFound     = errors.New("app: not found")
-	ErrNotRunning   = errors.New("app: not running")
-	ErrAccessDenied = errors.New("app: access denied")
+	ErrNotFound           = errors.New("app: not found")
+	ErrNotRunning         = errors.New("app: not running")
+	ErrAccessDenied       = errors.New("app: access denied")
+	ErrProjectUnavailable = errors.New("app: no accessible project found for user")
 )
 
 type LogStreamer interface {
@@ -69,14 +70,15 @@ func (s *Service) Create(userID string, req CreateAppRequest) (*domain.App, erro
 	if req.Name == "" {
 		return nil, fmt.Errorf("app: name is required")
 	}
-	if req.ProjectID == "" {
-		return nil, fmt.Errorf("app: project_id is required")
+	projectID := req.ProjectID
+	if projectID == "" {
+		projectID = "default"
 	}
 
 	runtime := req.Runtime
 	startCmd := req.StartCmd
 
-	app, err := s.repo.CreateForUser(userID, req.ProjectID, req.Name, req.GitURL, runtime, startCmd)
+	app, err := s.repo.CreateForUser(userID, projectID, req.Name, req.GitURL, runtime, startCmd)
 	if err != nil {
 		return nil, err
 	}

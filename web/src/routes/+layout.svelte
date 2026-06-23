@@ -12,36 +12,44 @@
 
 	let authChecked = $state(false);
 	let userMenuOpen = $state(false);
+	let mobileNavOpen = $state(false);
 	let menuRef = $state<HTMLDivElement>();
 
-	onMount(async () => {
-		if ($page.url.pathname === '/login') {
-			authChecked = true;
-			return;
-		}
+	onMount(() => {
+		window.addEventListener('resize', handleViewportChange);
 
-		const token = localStorage.getItem('razad_token');
-		if (!token) {
-			goto('/login');
-			return;
-		}
+		const initializeAuth = async () => {
+			if ($page.url.pathname === '/login') {
+				authChecked = true;
+				return;
+			}
 
-		try {
-			const res = await fetch('/api/v1/auth/me', {
-				headers: { 'Authorization': `Bearer ${token}` }
-			});
-			if (!res.ok) {
-				localStorage.removeItem('razad_token');
+			const token = localStorage.getItem('razad_token');
+			if (!token) {
 				goto('/login');
 				return;
 			}
-			const user = await res.json();
-			currentUser.set(user);
-			isAuthenticated.set(true);
-		} catch {
-			// daemon may be down — keep going
-		}
-		authChecked = true;
+
+			try {
+				const res = await fetch('/api/v1/auth/me', {
+					headers: { 'Authorization': `Bearer ${token}` }
+				});
+				if (!res.ok) {
+					localStorage.removeItem('razad_token');
+					goto('/login');
+					return;
+				}
+				const user = await res.json();
+				currentUser.set(user);
+				isAuthenticated.set(true);
+			} catch {
+				// daemon may be down — keep going
+			}
+			authChecked = true;
+		};
+
+		initializeAuth();
+		return () => window.removeEventListener('resize', handleViewportChange);
 	});
 
 	function toggleMenu(e: Event) {
@@ -52,6 +60,20 @@
 	function closeMenu(e: Event) {
 		if (menuRef && !menuRef.contains(e.target as Node)) {
 			userMenuOpen = false;
+		}
+	}
+
+	function toggleMobileNav() {
+		mobileNavOpen = !mobileNavOpen;
+	}
+
+	function closeMobileNav() {
+		mobileNavOpen = false;
+	}
+
+	function handleViewportChange() {
+		if (window.innerWidth > 900) {
+			mobileNavOpen = false;
 		}
 	}
 
@@ -75,10 +97,14 @@
 	</div>
 {:else}
 	<div class="app-shell">
-		<Sidebar />
+		<button class:mobile-backdrop={mobileNavOpen} class="backdrop" type="button" aria-label="Close navigation" onclick={closeMobileNav}></button>
+		<Sidebar mobileOpen={mobileNavOpen} onNavigate={closeMobileNav} />
 		<div class="main-area">
 			<header class="topbar">
-				<span class="topbar-title">Razad</span>
+				<div class="topbar-left">
+					<button class="nav-toggle" type="button" aria-label="Open navigation" aria-expanded={mobileNavOpen} onclick={toggleMobileNav}>☰</button>
+					<span class="topbar-title">Razad</span>
+				</div>
 				<div class="topbar-right" bind:this={menuRef}>
 					<div class="user-menu" role="button" tabindex="0"
 						onclick={toggleMenu}
@@ -128,11 +154,13 @@
 		flex-direction: column;
 		overflow: hidden;
 		background: var(--bg);
+		min-width: 0;
 	}
 	.topbar {
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
+		gap: var(--space-3);
 		height: var(--topbar-height);
 		padding: 0 var(--space-6);
 		background: var(--bg-alt);
@@ -140,6 +168,12 @@
 		flex-shrink: 0;
 		position: relative;
 		z-index: 100;
+	}
+	.topbar-left {
+		display: flex;
+		align-items: center;
+		gap: var(--space-3);
+		min-width: 0;
 	}
 	.topbar-title {
 		font-weight: var(--font-weight-bold);
@@ -151,6 +185,20 @@
 		align-items: center;
 		gap: var(--space-4);
 		position: relative;
+		min-width: 0;
+	}
+	.nav-toggle {
+		display: none;
+		align-items: center;
+		justify-content: center;
+		width: 2.25rem;
+		height: 2.25rem;
+		border: 1px solid var(--border);
+		border-radius: var(--radius-sm);
+		background: transparent;
+		color: var(--text);
+		cursor: pointer;
+		flex-shrink: 0;
 	}
 	.user-menu {
 		display: flex;
@@ -170,6 +218,11 @@
 		flex-shrink: 0;
 	}
 	.user-name-sm { font-size: var(--font-size-sm); color: var(--text); }
+	.backdrop {
+		display: none;
+		border: 0;
+		padding: 0;
+	}
 	.user-dropdown {
 		position: absolute;
 		top: calc(100% + 4px);
@@ -209,5 +262,45 @@
 		flex: 1;
 		overflow-y: auto;
 		padding: var(--space-6);
+	}
+
+	@media (max-width: 900px) {
+		.topbar {
+			padding: 0 var(--space-4);
+		}
+
+		.nav-toggle {
+			display: inline-flex;
+		}
+
+		.user-name-sm {
+			display: none;
+		}
+
+		.backdrop.mobile-backdrop {
+			display: block;
+			position: fixed;
+			inset: 0;
+			background: rgba(4, 22, 29, 0.72);
+			z-index: 210;
+		}
+
+		.workspace {
+			padding: var(--space-4);
+		}
+	}
+
+	@media (max-width: 640px) {
+		.topbar {
+			padding: 0 var(--space-3);
+		}
+
+		.topbar-title {
+			font-size: var(--font-size-sm);
+		}
+
+		.workspace {
+			padding: var(--space-3);
+		}
 	}
 </style>

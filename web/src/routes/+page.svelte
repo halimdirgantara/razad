@@ -152,6 +152,13 @@
 
 <style>
 	h1 { margin-bottom: var(--space-4); }
+	h1,
+	.mono,
+	.metric-value,
+	.metric-max,
+	.id-row .value {
+		overflow-wrap: anywhere;
+	}
 	.health-strip {
 		display: flex;
 		gap: var(--space-4);
@@ -161,10 +168,11 @@
 		display: flex;
 		flex-direction: column;
 		gap: 0.125rem;
-		min-width: 90px;
+		min-width: min(180px, 100%);
 		padding: var(--space-2) var(--space-3);
 		background: var(--bg-alt);
 		border-radius: var(--radius-sm);
+		flex: 1 1 180px;
 	}
 	.metric-label {
 		font-size: var(--font-size-xs);
@@ -214,5 +222,35 @@
 		color: var(--danger);
 		font-size: var(--font-size-sm);
 		margin-bottom: var(--space-3);
+	}
+
+	@media (max-width: 900px) {
+		.dashboard-grid {
+			grid-template-columns: 1fr;
+		}
+	}
+
+	@media (max-width: 640px) {
+		h1 {
+			font-size: var(--font-size-xl);
+		}
+
+		.health-strip {
+			gap: var(--space-3);
+		}
+
+		.metric {
+			min-width: 100%;
+		}
+
+		.metric-value {
+			font-size: 1.125rem;
+		}
+
+		.id-row {
+			flex-direction: column;
+			align-items: flex-start;
+			gap: var(--space-1);
+		}
 	}
 </style>
