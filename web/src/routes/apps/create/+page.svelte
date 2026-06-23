@@ -29,7 +29,6 @@
 				},
 				body: JSON.stringify({
 					name,
-					project_id: 'default',
 					git_url: gitUrl || undefined,
 					runtime: runtime || undefined,
 					start_cmd: startCmd || undefined,
@@ -133,4 +132,11 @@
 		margin-bottom: var(--space-3);
 	}
 	.actions { margin-top: var(--space-2); }
+
+	@media (max-width: 720px) {
+		.field-row {
+			flex-direction: column;
+			gap: 0;
+		}
+	}
 </style>

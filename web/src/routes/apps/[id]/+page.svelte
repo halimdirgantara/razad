@@ -662,4 +662,28 @@
 			grid-column: auto;
 		}
 	}
+
+	@media (max-width: 720px) {
+		.list li,
+		.log-line {
+			flex-direction: column;
+			align-items: flex-start;
+		}
+
+		.log-time,
+		.log-app {
+			width: auto;
+		}
+
+		.log-actions,
+		.header-actions,
+		.editor-actions {
+			width: 100%;
+		}
+
+		.log-actions,
+		.header-actions {
+			justify-content: flex-start;
+		}
+	}
 </style>

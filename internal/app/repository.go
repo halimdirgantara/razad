@@ -2,6 +2,7 @@ package app
 
 import (
 	"database/sql"
+	"errors"
 	"fmt"
 
 	"github.com/razad/razad/internal/domain"
@@ -70,21 +71,110 @@ func scanApps(rows *sql.Rows) ([]domain.App, error) {
 	return apps, nil
 }
 
+func (r *Repository) firstProjectForUser(userID string) (string, error) {
+	var projectID string
+	err := r.db.QueryRow(
+		`SELECT p.id
+		 FROM projects p
+		 JOIN organization_members om ON om.organization_id = p.organization_id
+		 WHERE om.user_id = ?
+		 ORDER BY p.created_at, p.id
+		 LIMIT 1`,
+		userID,
+	).Scan(&projectID)
+	if err != nil {
+		return "", err
+	}
+	return projectID, nil
+}
+
+func (r *Repository) ensurePersonalProjectForUser(userID string) (string, error) {
+	const (
+		orgName     = "Personal Workspace"
+		projectName = "Default Project"
+	)
+
+	orgID := "org-" + userID
+	projectID := "project-" + userID
+	memberID := "member-" + userID
+	slugSuffix := userID
+	if len(slugSuffix) > 12 {
+		slugSuffix = slugSuffix[:12]
+	}
+	orgSlug := "personal-" + slugSuffix
+
+	tx, err := r.db.Begin()
+	if err != nil {
+		return "", fmt.Errorf("app: begin ensure project: %w", err)
+	}
+	defer tx.Rollback()
+
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO organizations (id, name, slug, created_at, updated_at)
+		 VALUES (?, ?, ?, datetime('now'), datetime('now'))`,
+		orgID, orgName, orgSlug,
+	); err != nil {
+		return "", fmt.Errorf("app: ensure organization: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO organization_members (id, organization_id, user_id, role, created_at)
+		 VALUES (?, ?, ?, 'admin', datetime('now'))`,
+		memberID, orgID, userID,
+	); err != nil {
+		return "", fmt.Errorf("app: ensure membership: %w", err)
+	}
+	if _, err := tx.Exec(
+		`INSERT OR IGNORE INTO projects (id, organization_id, name, slug, created_at, updated_at)
+		 VALUES (?, ?, ?, 'default', datetime('now'), datetime('now'))`,
+		projectID, orgID, projectName,
+	); err != nil {
+		return "", fmt.Errorf("app: ensure project: %w", err)
+	}
+	if err := tx.Commit(); err != nil {
+		return "", fmt.Errorf("app: commit ensure project: %w", err)
+	}
+	return projectID, nil
+}
+
+func (r *Repository) resolveProjectForCreate(userID, requestedProjectID string) (string, error) {
+	if requestedProjectID == "" || requestedProjectID == "default" {
+		projectID, err := r.firstProjectForUser(userID)
+		if err == nil {
+			return projectID, nil
+		}
+		if !errors.Is(err, sql.ErrNoRows) {
+			return "", fmt.Errorf("app: resolve project: %w", err)
+		}
+		return r.ensurePersonalProjectForUser(userID)
+	}
+
+	allowed, err := r.canAccessProject(userID, requestedProjectID)
+	if err != nil {
+		return "", fmt.Errorf("app: check project access: %w", err)
+	}
+	if !allowed {
+		return "", ErrProjectUnavailable
+	}
+	return requestedProjectID, nil
+}
+
 // ---------------------------------------------------------------------------
 // Apps
 // ---------------------------------------------------------------------------
 
 // CreateForUser inserts a new app if the user can access the project.
 func (r *Repository) CreateForUser(userID, projectID, name, gitURL, runtime, startCmd string) (*domain.App, error) {
+	resolvedProjectID, err := r.resolveProjectForCreate(userID, projectID)
+	if err != nil {
+		return nil, err
+	}
+
 	app := &domain.App{}
-	err := r.db.QueryRow(
+	err = r.db.QueryRow(
 		`INSERT INTO apps (id, project_id, name, git_url, runtime, start_cmd, status, created_at, updated_at)
-		 SELECT lower(hex(randomblob(16))), p.id, ?, ?, ?, ?, 'created', datetime('now'), datetime('now')
-		 FROM projects p
-		 JOIN organization_members om ON om.organization_id = p.organization_id
-		 WHERE p.id = ? AND om.user_id = ?
+		 VALUES (lower(hex(randomblob(16))), ?, ?, ?, ?, ?, 'created', datetime('now'), datetime('now'))
 		 RETURNING id, project_id, name, git_url, runtime, start_cmd, status, created_at, updated_at`,
-		name, gitURL, runtime, startCmd, projectID, userID,
+		resolvedProjectID, name, gitURL, runtime, startCmd,
 	).Scan(&app.ID, &app.ProjectID, &app.Name, &app.GitURL, &app.Runtime, &app.StartCmd, &app.Status, &app.CreatedAt, &app.UpdatedAt)
 	if err != nil {
 		return nil, fmt.Errorf("app: create: %w", err)

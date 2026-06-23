@@ -123,6 +123,7 @@
 		display: flex;
 		align-items: center;
 		gap: var(--space-2);
+		flex-wrap: wrap;
 	}
 	.filter-input {
 		padding: var(--space-1) var(--space-2);
@@ -174,5 +175,21 @@
 	.log-empty {
 		padding: var(--space-6) var(--space-3);
 		text-align: center;
+	}
+
+	@media (max-width: 720px) {
+		.log-toolbar {
+			flex-direction: column;
+			align-items: stretch;
+		}
+
+		.log-actions {
+			width: 100%;
+		}
+
+		.filter-input {
+			width: 100%;
+			flex: 1 1 100%;
+		}
 	}
 </style>
