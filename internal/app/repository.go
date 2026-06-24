@@ -316,8 +316,20 @@ func (r *Repository) UpsertEnvVar(appID, key, encryptedValue string) error {
 	return err
 }
 
-// ListEnvVars returns all env var keys (values are encrypted) for an app.
+// ListEnvVars returns all env var keys (values are redacted) for an app.
 func (r *Repository) ListEnvVars(appID string) ([]domain.AppEnvVar, error) {
+	vars, err := r.ListEnvVarsWithValues(appID)
+	if err != nil {
+		return nil, err
+	}
+	for i := range vars {
+		vars[i].Value = ""
+	}
+	return vars, nil
+}
+
+// ListEnvVarsWithValues returns all env vars for internal runtime use.
+func (r *Repository) ListEnvVarsWithValues(appID string) ([]domain.AppEnvVar, error) {
 	rows, err := r.db.Query(
 		`SELECT id, app_id, key, value, created_at, updated_at
 		 FROM app_env_vars WHERE app_id = ? ORDER BY key`, appID,
@@ -333,7 +345,6 @@ func (r *Repository) ListEnvVars(appID string) ([]domain.AppEnvVar, error) {
 		if err := rows.Scan(&v.ID, &v.AppID, &v.Key, &v.Value, &v.CreatedAt, &v.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("app: list env vars scan: %w", err)
 		}
-		v.Value = "" // never expose encrypted value
 		vars = append(vars, v)
 	}
 	return vars, nil

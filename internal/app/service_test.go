@@ -4,6 +4,9 @@ import (
 	"context"
 	"database/sql"
 	"os"
+	"os/exec"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	_ "github.com/mattn/go-sqlite3"
@@ -63,9 +66,37 @@ func setupTestService(t *testing.T) *Service {
 	t.Helper()
 	db := setupTestDB(t)
 	repo := NewRepository(db)
-	proc := process.New(process.Config{Runner: "local", DataDir: t.TempDir()})
+	dataDir := t.TempDir()
+	proc := process.New(process.Config{Runner: "local", DataDir: dataDir})
 	enc, _ := crypto.New("test-key-1234567890123456")
-	return NewService(repo, proc, enc, t.TempDir())
+	return NewService(repo, proc, enc, dataDir)
+}
+
+func createGitRepoFixture(t *testing.T, files map[string]string) string {
+	t.Helper()
+	repoDir := t.TempDir()
+	for name, content := range files {
+		fullPath := filepath.Join(repoDir, name)
+		if err := os.MkdirAll(filepath.Dir(fullPath), 0o755); err != nil {
+			t.Fatalf("mkdir fixture path: %v", err)
+		}
+		if err := os.WriteFile(fullPath, []byte(content), 0o644); err != nil {
+			t.Fatalf("write fixture file %s: %v", name, err)
+		}
+	}
+	run := func(args ...string) {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repoDir
+		cmd.Env = append(os.Environ(), "GIT_AUTHOR_NAME=Razad Test", "GIT_AUTHOR_EMAIL=test@example.com", "GIT_COMMITTER_NAME=Razad Test", "GIT_COMMITTER_EMAIL=test@example.com")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %s failed: %v\n%s", strings.Join(args, " "), err, string(out))
+		}
+	}
+	run("init")
+	run("add", ".")
+	run("commit", "-m", "fixture")
+	return repoDir
 }
 
 func setupUserOnlyService(t *testing.T) *Service {
@@ -215,7 +246,7 @@ func TestDeployAndStop(t *testing.T) {
 
 	created, _ := svc.Create(testUserID, CreateAppRequest{
 		Name: "deploy-test", ProjectID: testProjectID, Runtime: "node",
-		StartCmd: "echo hello",
+		StartCmd: "sleep 2",
 	})
 
 	// Deploy
@@ -278,7 +309,7 @@ func TestDeployStartsLogStreamingAndDeleteStopsIt(t *testing.T) {
 
 	created, _ := svc.Create(testUserID, CreateAppRequest{
 		Name: "stream-me", ProjectID: testProjectID, Runtime: "node",
-		StartCmd: "echo hello",
+		StartCmd: "sleep 2",
 	})
 
 	if _, err := svc.Deploy(ctx, testUserID, created.ID); err != nil {
@@ -332,7 +363,7 @@ func TestListDeployments(t *testing.T) {
 
 	created, _ := svc.Create(testUserID, CreateAppRequest{
 		Name: "deployments-test", ProjectID: testProjectID, Runtime: "node",
-		StartCmd: "echo hello",
+		StartCmd: "sleep 2",
 	})
 
 	ctx := context.Background()
@@ -353,5 +384,140 @@ func TestListDeployments(t *testing.T) {
 	}
 	if deployments[0].Status != "success" {
 		t.Errorf("expected deployment status success, got %s", deployments[0].Status)
+	}
+}
+
+func TestDeploy_ClonesGitRepoIntoAppDir(t *testing.T) {
+	svc := setupTestService(t)
+	repoDir := createGitRepoFixture(t, map[string]string{
+		"package.json": `{"name":"fixture-app","version":"1.0.0"}`,
+		"README.md":    "fixture repo\n",
+	})
+
+	created, err := svc.Create(testUserID, CreateAppRequest{
+		Name:      "git-clone-test",
+		ProjectID: testProjectID,
+		GitURL:    repoDir,
+		Runtime:   "node",
+		StartCmd:  "sleep 2",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if _, err := svc.Deploy(context.Background(), testUserID, created.ID); err != nil {
+		t.Fatalf("Deploy failed: %v", err)
+	}
+
+	clonedFile := filepath.Join(svc.dataDir, "apps", created.ID, "package.json")
+	if _, err := os.Stat(clonedFile); err != nil {
+		t.Fatalf("expected cloned package.json at %s: %v", clonedFile, err)
+	}
+}
+
+func TestDeploy_FailedStartMarksDeploymentFailed(t *testing.T) {
+	svc := setupTestService(t)
+	repoDir := createGitRepoFixture(t, map[string]string{
+		"package.json": `{"name":"fixture-app","version":"1.0.0"}`,
+	})
+
+	created, err := svc.Create(testUserID, CreateAppRequest{
+		Name:      "git-fail-test",
+		ProjectID: testProjectID,
+		GitURL:    repoDir,
+		Runtime:   "node",
+		StartCmd:  "sh -c 'exit 7'",
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	if _, err := svc.Deploy(context.Background(), testUserID, created.ID); err == nil {
+		t.Fatal("expected deploy to fail for short-lived start command")
+	}
+
+	deployments, err := svc.ListDeployments(testUserID, created.ID)
+	if err != nil {
+		t.Fatalf("ListDeployments failed: %v", err)
+	}
+	if len(deployments) == 0 {
+		t.Fatal("expected at least one deployment record")
+	}
+	if deployments[0].Status != "failed" {
+		t.Fatalf("expected failed deployment status, got %s (log=%s)", deployments[0].Status, deployments[0].Log)
+	}
+
+	app, err := svc.Get(testUserID, created.ID)
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if app.Status != "failed" {
+		t.Fatalf("expected app status failed, got %s", app.Status)
+	}
+
+	if !strings.Contains(deployments[0].Log, "start verification") {
+		t.Fatalf("expected deployment log to mention verification failure, got: %s", deployments[0].Log)
+	}
+}
+
+func TestDeploy_UsesRuntimeDetectionWhenStartCommandMissing(t *testing.T) {
+	svc := setupTestService(t)
+	repoDir := createGitRepoFixture(t, map[string]string{
+		"package.json": `{"name":"fixture-app","version":"1.0.0","scripts":{"start":"node server.js"}}`,
+		"server.js":    "setTimeout(() => process.exit(0), 1500)\n",
+	})
+
+	created, err := svc.Create(testUserID, CreateAppRequest{
+		Name:      "git-detect-test",
+		ProjectID: testProjectID,
+		GitURL:    repoDir,
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	deployed, err := svc.Deploy(context.Background(), testUserID, created.ID)
+	if err != nil {
+		t.Fatalf("Deploy failed: %v", err)
+	}
+	if deployed.Status != "running" {
+		t.Fatalf("expected running app after detected runtime deploy, got %s", deployed.Status)
+	}
+
+	deployments, err := svc.ListDeployments(testUserID, created.ID)
+	if err != nil {
+		t.Fatalf("ListDeployments failed: %v", err)
+	}
+	if len(deployments) == 0 {
+		t.Fatal("expected deployment history")
+	}
+	if !strings.Contains(deployments[0].Log, "Resolved runtime: node") {
+		t.Fatalf("expected runtime detection log, got: %s", deployments[0].Log)
+	}
+	if !strings.Contains(deployments[0].Log, "Started: npm start") {
+		t.Fatalf("expected detected npm start command, got: %s", deployments[0].Log)
+	}
+}
+
+func TestDeploy_PassesConfiguredEnvVarsToProcess(t *testing.T) {
+	svc := setupTestService(t)
+	created, err := svc.Create(testUserID, CreateAppRequest{
+		Name:      "env-pass-test",
+		ProjectID: testProjectID,
+		StartCmd:  `test "$APP_PORT" = "4123" && sleep 2`,
+	})
+	if err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+	if err := svc.SetEnvVars(testUserID, created.ID, []EnvVarInput{{Key: "APP_PORT", Value: "4123"}}); err != nil {
+		t.Fatalf("SetEnvVars failed: %v", err)
+	}
+
+	deployed, err := svc.Deploy(context.Background(), testUserID, created.ID)
+	if err != nil {
+		t.Fatalf("Deploy failed: %v", err)
+	}
+	if deployed.Status != "running" {
+		t.Fatalf("expected running app after env deploy, got %s", deployed.Status)
 	}
 }

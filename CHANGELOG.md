@@ -11,6 +11,7 @@ All notable changes to Razad will be documented in this file.
 - Regression coverage for WebSocket-capable routing and app lifecycle integration.
 - AI orchestration scaffold with a protected `/api/v1/ai` endpoint, safe action registry, and audit logging.
 - Database management API and UI for listing, provisioning, and lifecycle control of database instances, with real daemon-backed provisioning via the process runner/service manager.
+- Regression coverage for public Git-based app deploys, including clone, runtime detection, and short-lived process failure handling.
 
 ### Changed
 - Dashboard system health now sends the stored bearer token when calling `/api/v1/health/stats`, fixing post-login 401s in local dev and browser sessions.
@@ -18,6 +19,7 @@ All notable changes to Razad will be documented in this file.
 - App detail page now connects to the backend WebSocket origin during local development so live logs work from Vite dev servers.
 - Backend startup wires the observability log streamer into the app service.
 - Backend startup now also wires the AI and database handlers into the main router.
+- App deploys now clone Git sources into the app workspace, execute commands through `/bin/sh -lc`, infer runtime defaults when `start_cmd` is omitted, run build/install steps before launch, and only report success after the process stays alive past initial verification.
 
 ### Verified
 - `go test github.com/razad/razad/... -count=1 -short`

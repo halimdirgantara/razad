@@ -170,3 +170,34 @@ func TestLocalRunner_LogFileCreated(t *testing.T) {
 
 	r.Stop(ctx, "logger")
 }
+
+func TestLocalRunner_ShellOperatorsWork(t *testing.T) {
+	dir := t.TempDir()
+	r := New(Config{Runner: "local", DataDir: dir})
+	ctx := context.Background()
+
+	if err := r.Start(ctx, "shell-ops", "mkdir -p nested && printf first && printf second > nested/out.txt", nil, dir); err != nil {
+		t.Fatalf("Start failed: %v", err)
+	}
+	defer r.Stop(ctx, "shell-ops")
+
+	time.Sleep(250 * time.Millisecond)
+
+	logFile := filepath.Join(dir, "logs", "shell-ops", "output.log")
+	data, err := os.ReadFile(logFile)
+	if err != nil {
+		t.Fatalf("read log file: %v", err)
+	}
+	if string(data) != "first" {
+		t.Fatalf("expected chained stdout 'first', got %q", string(data))
+	}
+
+	outFile := filepath.Join(dir, "nested", "out.txt")
+	out, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("expected redirected output file: %v", err)
+	}
+	if string(out) != "second" {
+		t.Fatalf("expected redirected output 'second', got %q", string(out))
+	}
+}
