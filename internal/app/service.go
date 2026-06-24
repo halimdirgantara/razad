@@ -6,12 +6,16 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"os/exec"
 	"path/filepath"
+	"strings"
+	"time"
 
 	"github.com/razad/razad/internal/audit"
 	"github.com/razad/razad/internal/crypto"
 	"github.com/razad/razad/internal/domain"
 	"github.com/razad/razad/internal/process"
+	runtimepkg "github.com/razad/razad/internal/runtime"
 )
 
 var (
@@ -125,39 +129,174 @@ func (s *Service) Deploy(ctx context.Context, userID, appID string) (*domain.App
 		s.repo.UpdateStatus(appID, "failed")
 		return nil, err
 	}
+	_ = s.repo.UpdateDeploymentStatus(deployment.ID, "running", "Preparing deployment workspace")
 
-	appDir := filepath.Join(s.dataDir, "apps", appID)
-	workDir := appDir
+	workDir, err := s.prepareAppDir(appID)
+	if err != nil {
+		return nil, s.failDeployment(appID, deployment.ID, fmt.Sprintf("prepare workspace: %v", err))
+	}
 
 	if s.logStreams != nil {
 		s.logStreams.WatchApp(appID)
 	}
 
-	if err := os.MkdirAll(workDir, 0755); err != nil {
-		s.repo.UpdateDeploymentStatus(deployment.ID, "failed", fmt.Sprintf("mkdir: %v", err))
-		s.repo.UpdateStatus(appID, "failed")
-		return nil, fmt.Errorf("app: create dir: %w", err)
+	logParts := []string{fmt.Sprintf("Preparing deployment in %s", workDir)}
+	if err := s.fetchSource(ctx, app.GitURL, workDir); err != nil {
+		return nil, s.failDeployment(appID, deployment.ID, fmt.Sprintf("clone: %v", err))
+	}
+	if app.GitURL != "" {
+		logParts = append(logParts, fmt.Sprintf("Cloned source from %s", app.GitURL))
 	}
 
-	startCommand := app.StartCmd
+	runtimeResult, buildCommand, startCommand, err := s.resolveRuntimeConfig(app, workDir)
+	if err != nil {
+		return nil, s.failDeployment(appID, deployment.ID, fmt.Sprintf("resolve runtime: %v", err))
+	}
+	if runtimeResult.Name != "" {
+		logParts = append(logParts, fmt.Sprintf("Resolved runtime: %s", runtimeResult.Name))
+	}
+	env, err := s.loadDeployedEnv(appID)
+	if err != nil {
+		return nil, s.failDeployment(appID, deployment.ID, fmt.Sprintf("load env: %v", err))
+	}
+
+	if buildCommand != "" {
+		if output, err := s.runCommand(ctx, buildCommand, workDir, env); err != nil {
+			return nil, s.failDeployment(appID, deployment.ID, fmt.Sprintf("build: %v\n%s", err, output))
+		}
+		logParts = append(logParts, fmt.Sprintf("Build succeeded: %s", buildCommand))
+	}
 	if startCommand == "" {
-		startCommand = "echo 'no start command configured'"
+		return nil, s.failDeployment(appID, deployment.ID, "start: no start command configured")
 	}
 
-	logLine := fmt.Sprintf("Starting: %s in %s", startCommand, workDir)
 	slog.Info("deploy: starting app", "app", appID, "cmd", startCommand)
-
-	if err := s.proc.Start(ctx, appID, startCommand, nil, workDir); err != nil {
-		s.repo.UpdateDeploymentStatus(deployment.ID, "failed", fmt.Sprintf("start: %v", err))
-		s.repo.UpdateStatus(appID, "failed")
-		return nil, fmt.Errorf("app: start: %w", err)
+	if err := s.proc.Start(ctx, appID, startCommand, flattenEnv(env), workDir); err != nil {
+		return nil, s.failDeployment(appID, deployment.ID, fmt.Sprintf("start: %v", err))
+	}
+	if err := s.verifyStarted(ctx, appID); err != nil {
+		return nil, s.failDeployment(appID, deployment.ID, fmt.Sprintf("start verification: %v", err))
 	}
 
-	s.repo.UpdateDeploymentStatus(deployment.ID, "success", logLine)
-	s.repo.UpdateStatus(appID, "running")
+	logParts = append(logParts, fmt.Sprintf("Started: %s", startCommand))
+	if err := s.repo.UpdateDeploymentStatus(deployment.ID, "success", strings.Join(logParts, "\n")); err != nil {
+		return nil, err
+	}
+	if err := s.repo.UpdateStatus(appID, "running"); err != nil {
+		return nil, err
+	}
 
 	updated, _ := s.repo.FindByIDForUser(userID, appID)
 	return updated, nil
+}
+
+func (s *Service) prepareAppDir(appID string) (string, error) {
+	appDir := filepath.Join(s.dataDir, "apps", appID)
+	if err := os.RemoveAll(appDir); err != nil {
+		return "", err
+	}
+	if err := os.MkdirAll(appDir, 0o755); err != nil {
+		return "", err
+	}
+	return appDir, nil
+}
+
+func (s *Service) fetchSource(ctx context.Context, gitURL, workDir string) error {
+	if gitURL == "" {
+		return nil
+	}
+	if err := os.RemoveAll(workDir); err != nil {
+		return err
+	}
+	parent := filepath.Dir(workDir)
+	if err := os.MkdirAll(parent, 0o755); err != nil {
+		return err
+	}
+	cmd := exec.CommandContext(ctx, "git", "clone", "--depth", "1", gitURL, workDir)
+	output, err := cmd.CombinedOutput()
+	if err != nil {
+		return fmt.Errorf("git clone failed: %w\n%s", err, string(output))
+	}
+	entries, err := os.ReadDir(workDir)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		return fmt.Errorf("git clone produced an empty workdir")
+	}
+	return nil
+}
+
+func (s *Service) resolveRuntimeConfig(app *domain.App, workDir string) (runtimepkg.RuntimeResult, string, string, error) {
+	detector := runtimepkg.New()
+	result, err := detector.Detect(workDir, app.Runtime)
+	if err != nil {
+		return runtimepkg.RuntimeResult{}, "", "", err
+	}
+	buildCommand := ""
+	if app.GitURL != "" {
+		buildCommand = result.BuildCommand
+	}
+	startCommand := app.StartCmd
+	if startCommand == "" {
+		startCommand = result.StartCommand
+	}
+	return result, buildCommand, startCommand, nil
+}
+
+func (s *Service) runCommand(ctx context.Context, command, workDir string, env map[string]string) (string, error) {
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
+	cmd.Dir = workDir
+	if len(env) > 0 {
+		cmd.Env = append(os.Environ(), flattenEnv(env)...)
+	}
+	out, err := cmd.CombinedOutput()
+	return string(out), err
+}
+
+func (s *Service) loadDeployedEnv(appID string) (map[string]string, error) {
+	stored, err := s.repo.ListEnvVarsWithValues(appID)
+	if err != nil {
+		return nil, err
+	}
+	if len(stored) == 0 {
+		return nil, nil
+	}
+	env := make(map[string]string, len(stored))
+	for _, item := range stored {
+		decrypted, err := s.enc.Decrypt(item.Value)
+		if err != nil {
+			return nil, fmt.Errorf("decrypt %s: %w", item.Key, err)
+		}
+		env[item.Key] = string(decrypted)
+	}
+	return env, nil
+}
+
+func flattenEnv(env map[string]string) []string {
+	pairs := make([]string, 0, len(env))
+	for k, v := range env {
+		pairs = append(pairs, k+"="+v)
+	}
+	return pairs
+}
+
+func (s *Service) verifyStarted(ctx context.Context, appID string) error {
+	time.Sleep(250 * time.Millisecond)
+	state, err := s.proc.Status(ctx, appID)
+	if err != nil {
+		return err
+	}
+	if state != process.StateRunning {
+		return fmt.Errorf("process not running after start (state=%s)", state)
+	}
+	return nil
+}
+
+func (s *Service) failDeployment(appID, deploymentID, message string) error {
+	_ = s.repo.UpdateDeploymentStatus(deploymentID, "failed", message)
+	_ = s.repo.UpdateStatus(appID, "failed")
+	return fmt.Errorf("app: deploy failed: %s", message)
 }
 
 // Stop stops a running application.
@@ -193,10 +332,15 @@ func (s *Service) Restart(ctx context.Context, userID, appID string) (*domain.Ap
 	}
 
 	appDir := filepath.Join(s.dataDir, "apps", appID)
+	env, err := s.loadDeployedEnv(appID)
+	if err != nil {
+		s.repo.UpdateStatus(appID, "failed")
+		return nil, fmt.Errorf("app: restart load env: %w", err)
+	}
 	if s.logStreams != nil {
 		s.logStreams.WatchApp(appID)
 	}
-	if err := s.proc.Start(ctx, appID, startCmd, nil, appDir); err != nil {
+	if err := s.proc.Start(ctx, appID, startCmd, flattenEnv(env), appDir); err != nil {
 		s.repo.UpdateStatus(appID, "failed")
 		return nil, fmt.Errorf("app: restart start: %w", err)
 	}

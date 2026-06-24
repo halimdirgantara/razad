@@ -18,7 +18,7 @@ func TestDeploymentsHandlerReturnsRecentDeployments(t *testing.T) {
 		Name: "detail-test",
 		ProjectID: testProjectID,
 		Runtime: "node",
-		StartCmd: "echo hello",
+		StartCmd: "sleep 2",
 	})
 	if err != nil {
 		t.Fatalf("Create failed: %v", err)

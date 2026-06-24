@@ -43,13 +43,13 @@ func (r *localRunner) Start(ctx context.Context, name, command string, env []str
 		return nil // already running — idempotent
 	}
 
-	// Parse command
-	parts := strings.Fields(command)
-	if len(parts) == 0 {
+	if command == "" {
 		return fmt.Errorf("%w: empty command for %s", ErrStartFailed, name)
 	}
 
-	cmd := exec.CommandContext(ctx, parts[0], parts[1:]...)
+	// Execute via the shell so user-provided commands can use operators such as
+	// &&, ||, redirects, variable expansion, and quoted arguments.
+	cmd := exec.CommandContext(ctx, "/bin/sh", "-lc", command)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), env...)
 
@@ -80,14 +80,55 @@ func (r *localRunner) Start(ctx context.Context, name, command string, env []str
 		slog.Warn("process: failed to write pid file", "name", name, "error", err)
 	}
 
-	// Track in memory
+	// Track in memory and reap the process in the background so exited children
+	// do not linger as zombies and Status can observe ProcessState.
 	r.procs[name] = cmd
+	go func(name string, cmd *exec.Cmd, logFile *os.File) {
+		defer logFile.Close()
+		if err := cmd.Wait(); err != nil {
+			slog.Debug("process exited", "name", name, "error", err)
+		}
+	}(name, cmd, f)
 
 	slog.Info("process started", "name", name, "pid", cmd.Process.Pid, "workDir", workDir)
 	return nil
 }
 
 func (r *localRunner) Stop(ctx context.Context, name string) error {
+	if cmd, ok := r.procs[name]; ok && cmd.Process != nil {
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			r.cleanupPID(name)
+			delete(r.procs, name)
+			return nil
+		}
+		slog.Debug("process: sending SIGTERM", "name", name, "pid", cmd.Process.Pid)
+		if err := cmd.Process.Signal(syscall.SIGTERM); err != nil {
+			r.cleanupPID(name)
+			delete(r.procs, name)
+			return nil
+		}
+		deadline := time.Now().Add(5 * time.Second)
+		for time.Now().Before(deadline) {
+			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+				r.cleanupPID(name)
+				delete(r.procs, name)
+				return nil
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		slog.Warn("process: force killing", "name", name, "pid", cmd.Process.Pid)
+		_ = cmd.Process.Signal(syscall.SIGKILL)
+		for i := 0; i < 20; i++ {
+			if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+				break
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+		r.cleanupPID(name)
+		delete(r.procs, name)
+		return nil
+	}
+
 	pid, err := r.readPID(name)
 	if err != nil {
 		return err
@@ -96,33 +137,21 @@ func (r *localRunner) Stop(ctx context.Context, name string) error {
 	proc, err := os.FindProcess(pid)
 	if err != nil {
 		r.cleanupPID(name)
-		return nil // process already gone
-	}
-
-	// Send SIGTERM for graceful shutdown
-	slog.Debug("process: sending SIGTERM", "name", name, "pid", pid)
-	if err := proc.Signal(syscall.SIGTERM); err != nil {
-		// Process might have already exited
-		r.cleanupPID(name)
 		return nil
 	}
 
-	// Wait a moment, then SIGKILL if still running
-	done := make(chan struct{}, 1)
-	go func() {
-		proc.Wait()
-		close(done)
-	}()
-
-	select {
-	case <-done:
-		slog.Info("process stopped gracefully", "name", name)
-	case <-time.After(5 * time.Second):
-		slog.Warn("process: force killing", "name", name, "pid", pid)
-		proc.Signal(syscall.SIGKILL)
-		<-done
+	if err := proc.Signal(syscall.SIGTERM); err != nil {
+		r.cleanupPID(name)
+		return nil
 	}
-
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		if err := proc.Signal(syscall.Signal(0)); err != nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	_ = proc.Signal(syscall.SIGKILL)
 	r.cleanupPID(name)
 	delete(r.procs, name)
 	return nil
@@ -144,11 +173,17 @@ func (r *localRunner) Status(ctx context.Context, name string) (ProcessState, er
 			delete(r.procs, name)
 			return StateStopped, nil
 		}
-		// Signal 0 checks if process exists
+		if cmd.ProcessState != nil && cmd.ProcessState.Exited() {
+			delete(r.procs, name)
+			r.cleanupPID(name)
+			return StateStopped, nil
+		}
+		// Signal 0 checks if process exists.
 		if err := cmd.Process.Signal(syscall.Signal(0)); err == nil {
 			return StateRunning, nil
 		}
 		delete(r.procs, name)
+		r.cleanupPID(name)
 		return StateStopped, nil
 	}
 
