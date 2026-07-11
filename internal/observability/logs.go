@@ -4,6 +4,7 @@ package observability
 
 import (
 	"bufio"
+	"fmt"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -53,6 +54,61 @@ func (ls *LogStreamer) UnwatchApp(appName string) {
 		delete(ls.watching, appName)
 	}
 	ls.mu.Unlock()
+}
+
+// ReadRecent returns the last `lines` lines from the named log file under
+// dataDir/logs/. Returns an empty slice (not an error) when the file does
+// not exist yet — a freshly-installed app has no output to show. Lines are
+// returned oldest-first within the requested window.
+func (ls *LogStreamer) ReadRecent(name string, lines int) ([]string, error) {
+	if lines <= 0 {
+		lines = 100
+	}
+	if lines > 5000 {
+		lines = 5000
+	}
+	if strings.TrimSpace(name) == "" {
+		return nil, fmt.Errorf("observability: log name is required")
+	}
+	if filepath.IsAbs(name) || strings.Contains(name, "..") {
+		return nil, fmt.Errorf("observability: invalid log name %q", name)
+	}
+	path := filepath.Join(ls.dataDir, "logs", name)
+	f, err := os.Open(path)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return []string{}, nil
+		}
+		return nil, fmt.Errorf("observability: open log %s: %w", name, err)
+	}
+	defer f.Close()
+
+	// Read all lines into memory then take the tail. Log files in this
+	// service are expected to be modest in size (per-app output); for very
+	// large files a ring buffer would be a better fit, but the simple
+	// approach keeps the dependency surface small.
+	all, err := readAllLines(f)
+	if err != nil {
+		return nil, fmt.Errorf("observability: read log %s: %w", name, err)
+	}
+	if len(all) <= lines {
+		return all, nil
+	}
+	return all[len(all)-lines:], nil
+}
+
+func readAllLines(f *os.File) ([]string, error) {
+	var lines []string
+	scanner := bufio.NewScanner(f)
+	// Allow long lines (some app logs include stack traces or JSON payloads).
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+	for scanner.Scan() {
+		lines = append(lines, scanner.Text())
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return lines, nil
 }
 
 // tail follows the log file, reading new lines as they're written.

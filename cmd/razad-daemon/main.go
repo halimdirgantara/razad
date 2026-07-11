@@ -113,6 +113,7 @@ func main() {
 	// --- WebSocket Hub ---
 	wsHub := websocketpkg.NewHub()
 	logStreamer := observability.NewLogStreamer(wsHub, paths.Logs())
+	observabilityHandler := observability.NewHandler(logStreamer)
 
 	// --- App ---
 	appRepo := app.NewRepository(db)
@@ -167,6 +168,7 @@ func main() {
 	protected.HandleFunc("/ws", wsHub.HandleConnection)
 	protected.HandleFunc("/api/v1/auth/me", authHandler.Me)
 	protected.HandleFunc("/api/v1/audit", auditHandler.List)
+	protected.HandleFunc("/api/v1/logs", observabilityHandler.List)
 	protected.Handle("/api/v1/orgs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
