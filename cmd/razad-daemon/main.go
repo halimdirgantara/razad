@@ -74,6 +74,7 @@ func main() {
 	// --- Audit ---
 	auditSvc := audit.NewService(db)
 	auditHandler := audit.NewHandler(auditSvc)
+	miscHandler := api.NewMiscHandler(db, cfg)
 
 	// --- Policy ---
 	policyEngine := policy.New(auditSvc)
@@ -168,7 +169,11 @@ func main() {
 	protected.HandleFunc("/ws", wsHub.HandleConnection)
 	protected.HandleFunc("/api/v1/auth/me", authHandler.Me)
 	protected.HandleFunc("/api/v1/audit", auditHandler.List)
+	protected.HandleFunc("/api/v1/events", auditHandler.List)
 	protected.HandleFunc("/api/v1/logs", observabilityHandler.List)
+	protected.HandleFunc("/api/v1/services", miscHandler.Services)
+	protected.HandleFunc("/api/v1/settings", miscHandler.Settings)
+	protected.HandleFunc("/api/v1/deployments", miscHandler.Deployments)
 	protected.Handle("/api/v1/orgs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
