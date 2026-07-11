@@ -213,3 +213,25 @@ func TestUnitFileContent(t *testing.T) {
 		}
 	}
 }
+
+// TestStaticUnitFileMatchesRendered guards against drift between the static
+// canonical copy at deployments/systemd/razad-daemon.service and the
+// renderUnitFile output. Both must stay in sync — operators may copy either
+// to /etc/systemd/system on a target host.
+func TestStaticUnitFileMatchesRendered(t *testing.T) {
+	// Repo root is two levels up from internal/install/.
+	staticPath := filepath.Join("..", "..", "deployments", "systemd", "razad-daemon.service")
+	data, err := os.ReadFile(staticPath)
+	if err != nil {
+		t.Skipf("static unit file not present at %s: %v", staticPath, err)
+	}
+
+	i := New(Options{}) // defaults match what the static file ships with
+	rendered := renderUnitFile(i.opts)
+
+	staticNorm := strings.TrimSpace(string(data))
+	renderedNorm := strings.TrimSpace(rendered)
+	if staticNorm != renderedNorm {
+		t.Errorf("static unit file and renderUnitFile drift:\n--- static ---\n%s\n--- rendered ---\n%s", staticNorm, renderedNorm)
+	}
+}
