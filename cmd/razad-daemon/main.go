@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -272,10 +273,31 @@ func main() {
 		IdleTimeout:  60 * time.Second,
 	}
 
+	// Resolve TLS configuration. If SelfSigned is requested, mint a cert
+	// at startup so a fresh dev install can boot HTTPS without certbot.
+	certFile := cfg.TLS.CertFile
+	keyFile := cfg.TLS.KeyFile
+	if cfg.TLS.Enabled && cfg.TLS.SelfSigned {
+		certFile = filepath.Join(paths.LetsEncrypt(), cfg.TLS.Domain, "selfsigned.crt")
+		keyFile = filepath.Join(paths.LetsEncrypt(), cfg.TLS.Domain, "selfsigned.key")
+		if err := sslSvc.GenerateSelfSigned(cfg.TLS.Domain, certFile, keyFile); err != nil {
+			slog.Error("failed to generate self-signed cert", "error", err)
+			os.Exit(1)
+		}
+	}
+
 	done := make(chan os.Signal, 1)
 	signal.Notify(done, os.Interrupt, syscall.SIGTERM)
 
 	go func() {
+		if cfg.TLS.Enabled {
+			slog.Info("listening (https)", "addr", addr, "cert", certFile)
+			if err := srv.ListenAndServeTLS(certFile, keyFile); err != nil && err != http.ErrServerClosed {
+				slog.Error("server error", "error", err)
+				os.Exit(1)
+			}
+			return
+		}
 		slog.Info("listening", "addr", addr)
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			slog.Error("server error", "error", err)

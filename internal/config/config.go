@@ -37,6 +37,31 @@ type Config struct {
 
 	// AutoMigrate runs database migrations on startup if true.
 	AutoMigrate bool `json:"auto_migrate" yaml:"auto_migrate"`
+
+	// TLS holds TLS configuration. When TLS.Enabled is true the daemon
+	// serves HTTPS on Port and reads the cert/key from TLSCert/TLSKey.
+	// When TLS.SelfSigned is true the daemon generates a self-signed cert
+	// for TLSDomain on startup (intended for local dev and quick trials,
+	// NOT for production — production should use certbot-issued certs).
+	TLS TLSConfig `json:"tls" yaml:"tls"`
+}
+
+// TLSConfig holds TLS settings.
+type TLSConfig struct {
+	// Enabled switches the HTTP server to HTTPS.
+	Enabled bool `json:"enabled" yaml:"enabled"`
+	// CertFile is the path to the PEM-encoded leaf certificate (or
+	// fullchain.pem from certbot). Required when Enabled is true and
+	// SelfSigned is false.
+	CertFile string `json:"cert_file" yaml:"cert_file"`
+	// KeyFile is the path to the PEM-encoded private key. Required when
+	// Enabled is true and SelfSigned is false.
+	KeyFile string `json:"key_file" yaml:"key_file"`
+	// SelfSigned causes the daemon to mint a self-signed cert for
+	// Domain at startup. Useful for local dev / quick trials.
+	SelfSigned bool `json:"self_signed" yaml:"self_signed"`
+	// Domain is the CN (and only SAN) for a self-signed cert.
+	Domain string `json:"domain" yaml:"domain"`
 }
 
 // DatabaseConfig holds database connection parameters.
@@ -126,6 +151,23 @@ func (c *Config) Validate() error {
 		errs = append(errs, "database.driver must be postgres or sqlite3")
 	}
 
+	// TLS validation.
+	switch {
+	case !c.TLS.Enabled:
+		// plain HTTP — nothing to validate
+	case c.TLS.SelfSigned:
+		if strings.TrimSpace(c.TLS.Domain) == "" {
+			errs = append(errs, "tls.domain is required when tls.self_signed is true")
+		}
+	default:
+		if strings.TrimSpace(c.TLS.CertFile) == "" {
+			errs = append(errs, "tls.cert_file is required when tls.enabled is true")
+		}
+		if strings.TrimSpace(c.TLS.KeyFile) == "" {
+			errs = append(errs, "tls.key_file is required when tls.enabled is true")
+		}
+	}
+
 	// Derive default DSN from data dir for SQLite
 	if c.Database.DSN == "" && c.Database.Driver == "sqlite3" {
 		c.Database.DSN = c.DataDir + "/razad.db"
@@ -180,5 +222,20 @@ func (c *Config) applyEnvOverrides() {
 	}
 	if v := os.Getenv("RAZAD_AUTO_MIGRATE"); v != "" {
 		c.AutoMigrate = v == "true" || v == "1"
+	}
+	if v := os.Getenv("RAZAD_TLS_ENABLED"); v != "" {
+		c.TLS.Enabled = v == "true" || v == "1"
+	}
+	if v := os.Getenv("RAZAD_TLS_CERT_FILE"); v != "" {
+		c.TLS.CertFile = v
+	}
+	if v := os.Getenv("RAZAD_TLS_KEY_FILE"); v != "" {
+		c.TLS.KeyFile = v
+	}
+	if v := os.Getenv("RAZAD_TLS_SELF_SIGNED"); v != "" {
+		c.TLS.SelfSigned = v == "true" || v == "1"
+	}
+	if v := os.Getenv("RAZAD_TLS_DOMAIN"); v != "" {
+		c.TLS.Domain = v
 	}
 }
