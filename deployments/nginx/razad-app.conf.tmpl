@@ -1,0 +1,38 @@
+# razad-app.conf.tmpl
+# Reference template for an nginx server block that reverse-proxies a single
+# razad-managed app. The proxy.Service.Render function in internal/proxy
+# produces the same shape programmatically at runtime; this static copy is
+# for operators who want to manage site configs by hand.
+#
+# Copy to /etc/nginx/sites-available/<app-name>.conf, edit the placeholders,
+# then `nginx -t && systemctl reload nginx`.
+#
+# Placeholders (match proxy.Service.Binding fields):
+#   <app-name>             used as the config filename
+#   <app-domain>           public hostname (e.g. app.example.com)
+#   <upstream-host>        host the app listens on (usually 127.0.0.1)
+#   <upstream-port>        port the app listens on
+#   <body-limit-mb>        max upload size in MB (0 = unlimited)
+
+server {
+    listen 80;
+    listen [::]:80;
+    server_name <app-domain>;
+
+    location /.well-known/acme-challenge/ {
+        root /var/www/html;
+    }
+
+    location / {
+        proxy_pass         http://<upstream-host>:<upstream-port>;
+        proxy_http_version 1.1;
+        proxy_set_header   Host              $host;
+        proxy_set_header   X-Real-IP         $remote_addr;
+        proxy_set_header   X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header   X-Forwarded-Proto $scheme;
+        proxy_set_header   Upgrade           $http_upgrade;
+        proxy_set_header   Connection        "upgrade";
+    }
+
+    client_max_body_size <body-limit-mb>m;
+}
