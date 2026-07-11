@@ -73,6 +73,7 @@ func main() {
 
 	// --- Audit ---
 	auditSvc := audit.NewService(db)
+	auditHandler := audit.NewHandler(auditSvc)
 
 	// --- Policy ---
 	policyEngine := policy.New(auditSvc)
@@ -165,6 +166,7 @@ func main() {
 	})
 	protected.HandleFunc("/ws", wsHub.HandleConnection)
 	protected.HandleFunc("/api/v1/auth/me", authHandler.Me)
+	protected.HandleFunc("/api/v1/audit", auditHandler.List)
 	protected.Handle("/api/v1/orgs", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:

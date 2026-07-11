@@ -78,3 +78,49 @@ func (s *Service) ListRecent(limit int) ([]Event, error) {
 	}
 	return events, nil
 }
+
+// ListPage returns a page of audit events ordered by created_at DESC, id DESC
+// for stable pagination when many events share a timestamp. limit must be
+// in [1, 200]; offset must be >= 0. Returns the slice, total count, and
+// any error.
+func (s *Service) ListPage(limit, offset int) ([]Event, int, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	if limit > 200 {
+		limit = 200
+	}
+	if offset < 0 {
+		offset = 0
+	}
+
+	var total int
+	if err := s.db.QueryRow(`SELECT COUNT(*) FROM audit_events`).Scan(&total); err != nil {
+		return nil, 0, fmt.Errorf("audit: count: %w", err)
+	}
+
+	rows, err := s.db.Query(
+		`SELECT id, actor_user_id, action, entity_type, entity_id, metadata_json, created_at
+		 FROM audit_events
+		 ORDER BY created_at DESC, id DESC
+		 LIMIT ? OFFSET ?`,
+		limit, offset,
+	)
+	if err != nil {
+		return nil, 0, fmt.Errorf("audit: list page: %w", err)
+	}
+	defer rows.Close()
+
+	events := make([]Event, 0, limit)
+	for rows.Next() {
+		var e Event
+		if err := rows.Scan(&e.ID, &e.ActorUserID, &e.Action, &e.EntityType, &e.EntityID, &e.MetadataJSON, &e.CreatedAt); err != nil {
+			return nil, 0, fmt.Errorf("audit: scan event: %w", err)
+		}
+		events = append(events, e)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, 0, fmt.Errorf("audit: iterate events: %w", err)
+	}
+	return events, total, nil
+}
