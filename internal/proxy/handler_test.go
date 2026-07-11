@@ -15,7 +15,7 @@ import (
 )
 
 func TestHandlerRender(t *testing.T) {
-	h := NewHandler(NewService(t.TempDir()), nil)
+	h := NewHandler(NewService(t.TempDir()), nil, nil)
 	body, _ := json.Marshal(map[string]any{
 		"name":          "app-one",
 		"domain":        "app.example.com",
@@ -39,7 +39,7 @@ func TestHandlerRender(t *testing.T) {
 
 func TestHandlerApplyAndRollback(t *testing.T) {
 	base := t.TempDir()
-	h := NewHandler(NewService(base), nil)
+	h := NewHandler(NewService(base), nil, nil)
 	binding := map[string]any{
 		"name":          "app-one",
 		"domain":        "app.example.com",

@@ -10,7 +10,6 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
-	"path/filepath"
 	"syscall"
 	"time"
 
@@ -23,10 +22,12 @@ import (
 	"github.com/razad/razad/internal/crypto"
 	"github.com/razad/razad/internal/database"
 	"github.com/razad/razad/internal/org"
+	"github.com/razad/razad/internal/policy"
 	"github.com/razad/razad/internal/process"
 	"github.com/razad/razad/internal/proxy"
 	"github.com/razad/razad/internal/server"
 	"github.com/razad/razad/internal/ssl"
+	"github.com/razad/razad/internal/storage"
 	"github.com/razad/razad/internal/observability"
 	websocketpkg "github.com/razad/razad/internal/websocket"
 	"github.com/razad/razad/web"
@@ -62,8 +63,18 @@ func main() {
 		}
 	}
 
+	// --- Storage paths ---
+	paths := storage.New(cfg.DataDir)
+	if err := paths.EnsureDirs(); err != nil {
+		slog.Error("failed to create storage directories", "error", err)
+		os.Exit(1)
+	}
+
 	// --- Audit ---
 	auditSvc := audit.NewService(db)
+
+	// --- Policy ---
+	policyEngine := policy.New(auditSvc)
 
 	// --- Auth ---
 	authRepo := auth.NewRepository(db)
@@ -87,7 +98,7 @@ func main() {
 	// --- Process Runner ---
 	procRunnerCfg := process.Config{
 		Runner:  "local",
-		DataDir: cfg.DataDir,
+		DataDir: paths.Apps(),
 	}
 	if v := os.Getenv("RAZAD_PROCESS_RUNNER"); v == "systemd" {
 		procRunnerCfg.Runner = "systemd"
@@ -95,38 +106,47 @@ func main() {
 	procRunner := process.New(procRunnerCfg)
 
 	// --- Health Collector ---
-	healthCollector := server.NewCollector(cfg.DataDir)
+	healthCollector := server.NewCollector(paths.Health())
 
 	// --- WebSocket Hub ---
 	wsHub := websocketpkg.NewHub()
-	logStreamer := observability.NewLogStreamer(wsHub, cfg.DataDir)
+	logStreamer := observability.NewLogStreamer(wsHub, paths.Logs())
 
 	// --- App ---
 	appRepo := app.NewRepository(db)
 	appSvc := app.NewService(appRepo, procRunner, enc, cfg.DataDir)
 	appSvc.SetAuditor(auditSvc)
 	appSvc.SetLogStreamer(logStreamer)
-	appHandler := app.NewHandler(appSvc)
+	appHandler := app.NewHandler(appSvc, policyEngine)
 
 	// --- Database ---
 	dbRepo := database.NewRepository(db)
 	dbSvc := database.NewService(dbRepo, procRunner, cfg.DataDir)
-	dbHandler := database.NewHandler(dbSvc)
+	dbHandler := database.NewHandler(dbSvc, policyEngine)
 
 	// --- AI ---
 	aiSvc := ai.NewService(auditSvc)
 	aiHandler := ai.NewHandler(aiSvc)
 
 	// --- Proxy ---
-	proxySvc := proxy.NewService(filepath.Join(cfg.DataDir, "nginx"))
-	proxyHandler := proxy.NewHandler(proxySvc, auditSvc)
+	proxySvc := proxy.NewService(paths.Nginx())
+	proxyHandler := proxy.NewHandler(proxySvc, auditSvc, policyEngine)
 
 	// --- SSL ---
-	sslSvc := ssl.NewService(filepath.Join(cfg.DataDir, "letsencrypt"))
-	sslHandler := ssl.NewHandler(sslSvc, auditSvc)
+	sslSvc := ssl.NewService(paths.LetsEncrypt())
+	sslHandler := ssl.NewHandler(sslSvc, auditSvc, policyEngine)
 
 	// --- Seed admin ---
 	seedAdminIfNeeded(authSvc)
+
+	// Install the admin rule for the policy engine. The seeded admin is the
+	// only admin in self-hosted MVP mode; future versions will read role
+	// membership from organization_members.
+	if admin, err := authSvc.LookupByEmail("admin@razad.local"); err == nil {
+		adminID := admin.ID
+		auth.SetAdminRule(func(userID string) bool { return userID == adminID })
+		database.SetIsAdminFn(auth.IsAdmin)
+	}
 
 	// --- Router ---
 	router := api.NewRouter()

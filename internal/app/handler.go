@@ -8,16 +8,30 @@ import (
 	"github.com/razad/razad/internal/api"
 	"github.com/razad/razad/internal/auth"
 	"github.com/razad/razad/internal/domain"
+	"github.com/razad/razad/internal/policy"
 )
 
 // Handler exposes app-related HTTP endpoints.
 type Handler struct {
-	svc *Service
+	svc    *Service
+	policy *policy.Engine
 }
 
 // NewHandler creates an app HTTP handler.
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, pol *policy.Engine) *Handler {
+	return &Handler{svc: svc, policy: pol}
+}
+
+func (h *Handler) gate(w http.ResponseWriter, r *http.Request, action policy.Action, resource policy.Resource) bool {
+	actor := auth.GetActor(r)
+	if h.policy == nil {
+		return true
+	}
+	if err := h.policy.MustCheck(r.Context(), policy.Actor{UserID: actor.UserID, IsAdmin: actor.IsAdmin}, action, resource); err != nil {
+		api.WriteError(w, http.StatusForbidden, "forbidden", err.Error())
+		return false
+	}
+	return true
 }
 
 // ListAll handles GET /api/v1/apps.
@@ -52,6 +66,10 @@ func (h *Handler) Create(w http.ResponseWriter, r *http.Request) {
 	var req CreateAppRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+
+	if !h.gate(w, r, policy.ActionAppCreate, policy.Resource{Type: "app", ID: req.Name, OwnerUserID: userID}) {
 		return
 	}
 
@@ -129,6 +147,10 @@ func (h *Handler) Deploy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.gate(w, r, policy.ActionAppDeploy, policy.Resource{Type: "app", ID: id, OwnerUserID: userID}) {
+		return
+	}
+
 	app, err := h.svc.Deploy(r.Context(), userID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusForbidden, "deploy_failed", err.Error())
@@ -149,6 +171,10 @@ func (h *Handler) Stop(w http.ResponseWriter, r *http.Request) {
 	id := extractID(r.URL.Path, "/api/v1/apps/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing app id")
+		return
+	}
+
+	if !h.gate(w, r, policy.ActionAppStop, policy.Resource{Type: "app", ID: id, OwnerUserID: userID}) {
 		return
 	}
 
@@ -175,6 +201,10 @@ func (h *Handler) Restart(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.gate(w, r, policy.ActionAppRestart, policy.Resource{Type: "app", ID: id, OwnerUserID: userID}) {
+		return
+	}
+
 	app, err := h.svc.Restart(r.Context(), userID, id)
 	if err != nil {
 		api.WriteError(w, http.StatusForbidden, "restart_failed", err.Error())
@@ -195,6 +225,10 @@ func (h *Handler) Delete(w http.ResponseWriter, r *http.Request) {
 	id := extractID(r.URL.Path, "/api/v1/apps/")
 	if id == "" {
 		api.WriteError(w, http.StatusBadRequest, "invalid_path", "missing app id")
+		return
+	}
+
+	if !h.gate(w, r, policy.ActionAppDelete, policy.Resource{Type: "app", ID: id, OwnerUserID: userID}) {
 		return
 	}
 
@@ -262,6 +296,9 @@ func (h *Handler) Env(w http.ResponseWriter, r *http.Request) {
 		api.WriteJSON(w, http.StatusOK, vars)
 
 	case http.MethodPut:
+		if !h.gate(w, r, policy.ActionAppEnvWrite, policy.Resource{Type: "app", ID: id, OwnerUserID: userID}) {
+			return
+		}
 		var inputs []EnvVarInput
 		if err := json.NewDecoder(r.Body).Decode(&inputs); err != nil {
 			api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")

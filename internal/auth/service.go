@@ -113,6 +113,18 @@ func (s *Service) Logout(token string) error {
 	return s.repo.DeleteSession(token)
 }
 
+// LookupByEmail returns the public user record for an email address. It is
+// used by the daemon at startup to resolve the seeded admin's user ID for
+// the policy engine. Returns ErrSessionNotFound-style semantics via
+// fmt.Errorf when the user is missing.
+func (s *Service) LookupByEmail(email string) (*UserInfo, error) {
+	user, err := s.repo.FindByEmail(email)
+	if err != nil {
+		return nil, err
+	}
+	return &UserInfo{ID: user.ID, Name: user.Name, Email: user.Email}, nil
+}
+
 // generateToken generates a cryptographically random hex token.
 func generateToken(length int) (string, error) {
 	bytes := make([]byte, length)

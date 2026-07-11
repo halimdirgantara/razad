@@ -7,17 +7,31 @@ import (
 	"github.com/razad/razad/internal/api"
 	"github.com/razad/razad/internal/audit"
 	"github.com/razad/razad/internal/auth"
+	"github.com/razad/razad/internal/policy"
 )
 
 // Handler exposes SSL/certbot endpoints.
 type Handler struct {
 	svc     *Service
 	auditor *audit.Service
+	policy  *policy.Engine
 }
 
 // NewHandler creates an SSL HTTP handler.
-func NewHandler(svc *Service, auditor *audit.Service) *Handler {
-	return &Handler{svc: svc, auditor: auditor}
+func NewHandler(svc *Service, auditor *audit.Service, pol *policy.Engine) *Handler {
+	return &Handler{svc: svc, auditor: auditor, policy: pol}
+}
+
+func (h *Handler) gate(w http.ResponseWriter, r *http.Request, action policy.Action, resource policy.Resource) bool {
+	actor := auth.GetActor(r)
+	if h.policy == nil {
+		return true
+	}
+	if err := h.policy.MustCheck(r.Context(), policy.Actor{UserID: actor.UserID, IsAdmin: actor.IsAdmin}, action, resource); err != nil {
+		api.WriteError(w, http.StatusForbidden, "forbidden", err.Error())
+		return false
+	}
+	return true
 }
 
 type issueRequest struct {
@@ -48,6 +62,10 @@ func (h *Handler) Issue(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if !h.gate(w, r, policy.ActionSSLIssue, policy.Resource{Type: "ssl", ID: req.Domain}) {
+		return
+	}
+
 	cmd, err := h.svc.IssueCommand(Request{Domain: req.Domain, Email: req.Email, Webroot: req.Webroot})
 	if err != nil {
 		api.WriteError(w, http.StatusBadRequest, "issue_failed", err.Error())
@@ -75,6 +93,10 @@ func (h *Handler) Renew(w http.ResponseWriter, r *http.Request) {
 	var req renewRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		api.WriteError(w, http.StatusBadRequest, "invalid_request", "invalid JSON body")
+		return
+	}
+
+	if !h.gate(w, r, policy.ActionSSLRenew, policy.Resource{Type: "ssl", ID: req.Domain}) {
 		return
 	}
 

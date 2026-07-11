@@ -22,6 +22,13 @@ func setupAuditDB(t *testing.T) *sql.DB {
 	if err := database.Migrate(db); err != nil {
 		t.Fatalf("migrate: %v", err)
 	}
+	// Seed a test user so audit_events FK constraints are satisfied.
+	if _, err := db.Exec(
+		`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`,
+		"user-1", "Test User", "user-1@example.com", "x",
+	); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
 	return db
 }
 

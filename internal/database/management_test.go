@@ -179,7 +179,7 @@ func TestServiceListReturnsCreatedDatabaseInstances(t *testing.T) {
 func TestHandlerCreateAndListDatabaseInstances(t *testing.T) {
 	db := setupManagementTestDB(t)
 	svc := NewService(NewRepository(db), &fakeRunner{}, t.TempDir())
-	h := NewHandler(svc)
+	h := NewHandler(svc, nil)
 
 	createReq := httptest.NewRequest(http.MethodPost, "/api/v1/databases", strings.NewReader(`{"name":"MySQL Primary","engine":"mysql"}`))
 	createReq = createReq.WithContext(context.WithValue(createReq.Context(), auth.ContextUserIDKey, testUserID))

@@ -12,7 +12,7 @@ import (
 
 func TestDeploymentsHandlerReturnsRecentDeployments(t *testing.T) {
 	svc := setupTestService(t)
-	h := NewHandler(svc)
+	h := NewHandler(svc, nil)
 
 	created, err := svc.Create(testUserID, CreateAppRequest{
 		Name: "detail-test",

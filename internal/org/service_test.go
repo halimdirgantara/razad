@@ -28,6 +28,14 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("failed to migrate test db: %v", err)
 	}
 
+	// Seed the test user so organization_members FK constraints are satisfied.
+	if _, err := db.Exec(
+		`INSERT INTO users (id, name, email, password_hash) VALUES (?, ?, ?, ?)`,
+		testUserID, "Test User", "test-user-001@example.com", "x",
+	); err != nil {
+		t.Fatalf("seed user: %v", err)
+	}
+
 	return db
 }
 

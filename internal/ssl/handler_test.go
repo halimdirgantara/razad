@@ -13,7 +13,7 @@ import (
 )
 
 func TestHandlerIssue(t *testing.T) {
-	h := NewHandler(NewService(t.TempDir()), nil)
+	h := NewHandler(NewService(t.TempDir()), nil, nil)
 	body, _ := json.Marshal(map[string]any{
 		"domain":  "app.example.com",
 		"email":   "ops@example.com",
@@ -33,7 +33,7 @@ func TestHandlerIssue(t *testing.T) {
 }
 
 func TestHandlerRenew(t *testing.T) {
-	h := NewHandler(NewService(t.TempDir()), nil)
+	h := NewHandler(NewService(t.TempDir()), nil, nil)
 	body, _ := json.Marshal(map[string]any{"domain": "app.example.com"})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/ssl/renew", bytes.NewReader(body))
 	req = req.WithContext(context.WithValue(req.Context(), auth.ContextUserIDKey, "user-1"))

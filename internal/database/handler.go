@@ -6,8 +6,24 @@ import (
 	"strings"
 
 	"github.com/razad/razad/internal/api"
+	"github.com/razad/razad/internal/policy"
 	"github.com/razad/razad/internal/requestctx"
 )
+
+// isAdminFn is set once at startup by SetIsAdminFn. It is consulted by the
+// gate helper to populate the policy.Actor's IsAdmin field without forcing
+// this package to import internal/auth (which would create a test-binary
+// import cycle through internal/auth/service_test.go).
+var isAdminFn = func(string) bool { return false }
+
+// SetIsAdminFn installs the admin predicate used by the gate helper. A nil
+// fn is ignored so the default "nobody is admin" remains in place. main.go
+// calls this with auth.IsAdmin after the admin rule has been installed.
+func SetIsAdminFn(fn func(userID string) bool) {
+	if fn != nil {
+		isAdminFn = fn
+	}
+}
 
 func extractID(path, prefix string) string {
 	if !strings.HasPrefix(path, prefix) {
@@ -22,12 +38,26 @@ func extractID(path, prefix string) string {
 
 // Handler exposes database-management endpoints.
 type Handler struct {
-	svc *Service
+	svc    *Service
+	policy *policy.Engine
 }
 
 // NewHandler creates a database HTTP handler.
-func NewHandler(svc *Service) *Handler {
-	return &Handler{svc: svc}
+func NewHandler(svc *Service, pol *policy.Engine) *Handler {
+	return &Handler{svc: svc, policy: pol}
+}
+
+func (h *Handler) gate(w http.ResponseWriter, r *http.Request, action policy.Action, resource policy.Resource) bool {
+	if h.policy == nil {
+		return true
+	}
+	userID := requestctx.UserID(r.Context())
+	actor := policy.Actor{UserID: userID, IsAdmin: isAdminFn(userID)}
+	if err := h.policy.MustCheck(r.Context(), actor, action, resource); err != nil {
+		api.WriteError(w, http.StatusForbidden, "forbidden", err.Error())
+		return false
+	}
+	return true
 }
 
 func (h *Handler) userID(r *http.Request) string {
