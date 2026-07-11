@@ -188,6 +188,97 @@ func TestWriteUnitFileRewritesWhenContentDiffers(t *testing.T) {
 	}
 }
 
+func TestEnsureDirsFailsWhenTargetPathIsReadOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits not honored on windows")
+	}
+	base := t.TempDir()
+	// Pre-create a child path as a regular file. The installer should refuse
+	// to clobber it with a directory. We use a child that already exists as a
+	// file because that's the most portable "unwriteable" case.
+	collision := filepath.Join(base, "logs")
+	if err := os.WriteFile(collision, []byte("not a dir"), 0o644); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	i := New(Options{DataDir: base, SkipSystemd: true})
+	_, _, err := i.EnsureDirs()
+	if err == nil {
+		t.Error("expected EnsureDirs to fail when a child path is a regular file")
+	}
+}
+
+func TestWriteUnitFileFailsWhenDirIsReadOnly(t *testing.T) {
+	if runtime.GOOS == "windows" {
+		t.Skip("unix permission bits not honored on windows")
+	}
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses unix permission bits; cannot construct read-only dir")
+	}
+	base := t.TempDir()
+	unitDir := filepath.Join(base, "readonly")
+	if err := os.MkdirAll(unitDir, 0o555); err != nil {
+		t.Fatalf("mkdir readonly: %v", err)
+	}
+	i := New(Options{
+		DataDir:     base,
+		BinaryPath:  "/usr/local/bin/razad-daemon",
+		UnitPath:    filepath.Join(unitDir, "razad-daemon.service"),
+		SkipSystemd: true,
+	})
+	res := &Result{UnitPath: filepath.Join(unitDir, "razad-daemon.service")}
+	if err := i.WriteUnitFile(res); err == nil {
+		t.Error("expected WriteUnitFile to fail when target dir is read-only")
+	}
+}
+
+func TestRunDoesNotCallSystemctlWhenSkipSystemd(t *testing.T) {
+	base := t.TempDir()
+	i := New(Options{
+		DataDir:     base,
+		BinaryPath:  "/usr/local/bin/razad-daemon",
+		UnitPath:    filepath.Join(base, "razad-daemon.service"),
+		SkipSystemd: true,
+	})
+	res, err := i.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if res.EnabledService {
+		t.Error("EnabledService should be false when SkipSystemd is true")
+	}
+	if len(res.CreatedDirs) == 0 {
+		t.Error("expected CreateDirs to report created dirs")
+	}
+	if !res.WroteUnit {
+		t.Error("expected WriteUnitFile to report WroteUnit=true on first run")
+	}
+}
+
+func TestRunDoesNotMutateAnythingInDryRun(t *testing.T) {
+	base := t.TempDir()
+	unitPath := filepath.Join(base, "razad-daemon.service")
+	i := New(Options{
+		DataDir:     base,
+		BinaryPath:  "/usr/local/bin/razad-daemon",
+		UnitPath:    unitPath,
+		SkipSystemd: true,
+		DryRun:      true,
+	})
+	res, err := i.Run()
+	if err != nil {
+		t.Fatalf("Run: %v", err)
+	}
+	if !res.WroteUnit {
+		t.Error("DryRun should still report WroteUnit=true")
+	}
+	if _, err := os.Stat(filepath.Join(base, "logs")); err == nil {
+		t.Error("DryRun should not create directories on disk")
+	}
+	if _, err := os.Stat(unitPath); err == nil {
+		t.Error("DryRun should not write unit file to disk")
+	}
+}
+
 func TestUnitFileContent(t *testing.T) {
 	i := New(Options{
 		DataDir:    "/var/lib/razad",
